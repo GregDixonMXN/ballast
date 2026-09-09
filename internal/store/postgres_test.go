@@ -8,6 +8,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"ballast/internal/changeset"
 	"ballast/internal/project"
 	"ballast/internal/task"
@@ -60,7 +62,7 @@ func TestPostgresRoundTrip(t *testing.T) {
 		t.Fatalf("list tasks = %+v %v", lt, err)
 	}
 
-	w := workspace.Workspace{ID: "w1", ProjectID: p.ID, TaskID: ta.ID,
+	w := workspace.Workspace{ID: uuid.NewString(), ProjectID: p.ID, TaskID: ta.ID,
 		RepoPath: "/tmp/x", Base: "abc123", Path: "/tmp/w1", Status: workspace.Ready}
 	if err := r.SaveWorkspace(ctx, w); err != nil {
 		t.Fatalf("save workspace: %v", err)
@@ -70,13 +72,13 @@ func TestPostgresRoundTrip(t *testing.T) {
 		t.Fatalf("list workspaces = %+v %v", lw, err)
 	}
 
-	cs := changeset.Changeset{ID: "c1", ProjectID: p.ID, TaskID: ta.ID,
+	cs := changeset.Changeset{ID: uuid.NewString(), ProjectID: p.ID, TaskID: ta.ID,
 		Base: "abc123", Files: []string{"a.go", "b.go"}, Diff: "diff...",
 		Status: changeset.InReview}
 	if err := r.SaveChangeset(ctx, cs); err != nil {
 		t.Fatalf("save changeset: %v", err)
 	}
-	gc, err := r.GetChangeset(ctx, "c1")
+	gc, err := r.GetChangeset(ctx, cs.ID)
 	if err != nil || len(gc.Files) != 2 || gc.Status != changeset.InReview {
 		t.Fatalf("get changeset = %+v %v", gc, err)
 	}
