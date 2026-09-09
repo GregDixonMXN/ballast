@@ -1,0 +1,7 @@
+.ballast-worktrees/
+.demo-*/
+bin/
+node_modules/
+.next/
+.env
+*.log

@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ballast
+      POSTGRES_PASSWORD: ballast
+      POSTGRES_DB: ballast
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ballast"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    environment:
+      DATABASE_URL: postgres://ballast:ballast@postgres:5432/ballast?sslmode=disable
+      BALLAST_ADDR: ":8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - repos:/repos
+      - worktrees:/worktrees
+
+  runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    environment:
+      BALLAST_SERVER: http://api:8080
+    depends_on:
+      - api
+    volumes:
+      - repos:/repos
+      - worktrees:/worktrees
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  pgdata:
+  repos:
+  worktrees:
