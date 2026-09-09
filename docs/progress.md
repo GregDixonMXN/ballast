@@ -1,6 +1,9 @@
 # Progress
 
 ## Completed
+- Name: Ballast (Forge/Switchyard/Shipyard/SignalBox/Switchboard/Interlock/
+  Roundhouse/Slipway/Bulwark all collide with live dev/agent tools)
+- Initial commit aa9107e on main (56 files): full MVP vertical slice
 - Repo scaffold: monorepo layout, go.mod, Docker, compose, CI, migrations
 - Domain core: events bus, git worktrees, workspaces, tasks+leases,
   changesets, conflict V1, agent adapters (shell + codex + claude),
