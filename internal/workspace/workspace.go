@@ -34,6 +34,7 @@ type Workspace struct {
 	ProjectID string    `json:"project_id"`
 	TaskID    string    `json:"task_id"`
 	AgentID   string    `json:"agent_id,omitempty"`
+	RunnerID  string    `json:"runner_id,omitempty"`
 	RepoPath  string    `json:"repo_path"`
 	Base      string    `json:"base_commit"`
 	Path      string    `json:"path"`
@@ -126,6 +127,10 @@ func (m *Manager) Destroy(ctx context.Context, id string) error {
 	w.UpdatedAt = time.Now().UTC()
 	return nil
 }
+
+// Attach re-tracks a surviving worktree (e.g. after a restart) without
+// touching the repository.
+func (m *Manager) Attach(w *Workspace) { m.ws[w.ID] = w }
 
 // Get returns a tracked workspace.
 func (m *Manager) Get(id string) (*Workspace, bool) { w, ok := m.ws[id]; return w, ok }

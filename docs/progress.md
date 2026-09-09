@@ -1,6 +1,12 @@
 # Progress
 
 ## Completed
+- Persistence: services layer (projects/tasks/workspaces/changesets) over
+  a Repo interface with memory + Postgres backends; server uses Postgres
+  when DATABASE_URL is set, memory otherwise; worktree re-attach on boot;
+  PG round-trip test (runs in CI) + Postgres service in CI workflow
+- Live HTTP smoke: project → task → RUNNING → workspace → file edit →
+  changeset → approve, all 200s
 - Name: Ballast (Forge/Switchyard/Shipyard/SignalBox/Switchboard/Interlock/
   Roundhouse/Slipway/Bulwark all collide with live dev/agent tools)
 - Initial commit aa9107e on main (56 files): full MVP vertical slice
