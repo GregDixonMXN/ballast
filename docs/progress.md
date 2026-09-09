@@ -1,6 +1,13 @@
 # Progress
 
 ## Completed
+- Dispatch: runner registry + heartbeats + per-runner queues; task assign
+  creates workspace and enqueues; runner daemon polls, runs adapter in
+  worktree, runs test command, reports; server marks COMPLETED/FAILED,
+  auto-builds changeset on success, moves task to REVIEW (or BLOCKED on
+  failure). Proven live: success and failure paths end to end.
+- 204-empty-queue bug caught live and fixed (Poll treated 204 as error
+  path and reported phantom work); regression test added.
 - Persistence: services layer (projects/tasks/workspaces/changesets) over
   a Repo interface with memory + Postgres backends; server uses Postgres
   when DATABASE_URL is set, memory otherwise; worktree re-attach on boot;

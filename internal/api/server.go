@@ -17,11 +17,12 @@ import (
 
 // Server wires handlers to domain services.
 type Server struct {
-	mux   *http.ServeMux
-	bus   events.Bus
-	auth  *auth.Tokens
-	perms auth.Authorizer
-	count *telemetry.Counters
+	mux      *http.ServeMux
+	bus      events.Bus
+	auth     *auth.Tokens
+	perms    auth.Authorizer
+	count    *telemetry.Counters
+	dispatch *Dispatch
 	// Services are interfaces so Postgres/memory swap without handler edits.
 	Projects   ProjectService
 	Tasks      TaskService
@@ -36,11 +37,14 @@ type ProjectService interface {
 }
 type TaskService interface {
 	Create(projectID, title, desc string, scopes []string) (any, error)
+	Get(id string) (any, error)
 	List(projectID string) ([]any, error)
 	Transition(id, to string) (any, error)
 }
 type WorkspaceService interface {
 	Create(projectID, taskID, repo string) (any, error)
+	Get(id string) (any, error)
+	SetStatus(id, status string) (any, error)
 	List(projectID string) ([]any, error)
 	ChangedFiles(id string) ([]string, error)
 	Diff(id string) (string, error)
@@ -54,7 +58,8 @@ type ChangesetService interface {
 // New builds routes. Health/readiness stay unauthenticated for probes.
 func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s := &Server{mux: http.NewServeMux(), bus: bus, auth: toks,
-		perms: auth.LocalAuthorizer{}, count: telemetry.NewCounters()}
+		perms: auth.LocalAuthorizer{}, count: telemetry.NewCounters(),
+		dispatch: NewDispatch()}
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /readyz", s.health)
 	s.mux.HandleFunc("GET /metrics", s.metrics)
@@ -71,6 +76,12 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s.mux.HandleFunc("POST /workspaces/{id}/changesets", s.requireAuth(s.buildChangeset))
 	s.mux.HandleFunc("GET /changesets/{id}", s.requireAuth(s.getChangeset))
 	s.mux.HandleFunc("POST /changesets/{id}/decision", s.requireAuth(s.decideChangeset))
+	s.mux.HandleFunc("POST /runners", s.requireAuth(s.registerRunner))
+	s.mux.HandleFunc("POST /runners/{id}/heartbeat", s.requireAuth(s.heartbeat))
+	s.mux.HandleFunc("GET /runners/{id}/work", s.requireAuth(s.pollWork))
+	s.mux.HandleFunc("POST /runners/{id}/results", s.requireAuth(s.reportResults))
+	s.mux.HandleFunc("POST /tasks/{id}/assign", s.requireAuth(s.assignTask))
+	s.mux.HandleFunc("POST /workspaces/{id}/status", s.requireAuth(s.setWorkspaceStatus))
 	return s
 }
 

@@ -92,6 +92,10 @@ func (s *Tasks) Create(projectID, title, desc string, scopes []string) (any, err
 	return t, nil
 }
 
+func (s *Tasks) Get(id string) (any, error) {
+	return s.Repo.GetTask(context.Background(), id)
+}
+
 func (s *Tasks) List(projectID string) ([]any, error) {
 	ts, err := s.Repo.ListTasks(context.Background(), projectID)
 	if err != nil {
@@ -169,6 +173,26 @@ func (s *Workspaces) Create(projectID, taskID, repo string) (any, error) {
 		return nil, err
 	}
 	return w, nil
+}
+
+func (s *Workspaces) Get(id string) (any, error) {
+	w, err := s.Repo.GetWorkspace(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+func (s *Workspaces) SetStatus(id, status string) (any, error) {
+	ctx := context.Background()
+	updated, err := s.Mgr.SetStatus(id, workspace.Status(status))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Repo.SaveWorkspace(ctx, *updated); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (s *Workspaces) List(projectID string) ([]any, error) {
