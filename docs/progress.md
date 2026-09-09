@@ -1,6 +1,15 @@
 # Progress
 
 ## Completed
+- Integration: approve → test-merge worktree → apply, commit, fast-forward
+  canonical branch via update-ref, move recorded head; stale losers marked
+  NEEDS_REBASE (applies) or CONFLICTED + conflict event; 409 on anything
+  not APPROVED, 403 on runner tokens (agents can't merge). Proven live:
+  merge moved head, sibling triaged same call, re-integrate refused.
+- Absolute worktree paths (relative paths split git vs server cwd and
+  broke diffs/builds/merges whenever repo != server dir); regression test.
+- Newline-terminated diffs (git apply calls unterminated final lines
+  corrupt); fixed in DiffBase.
 - Dispatch: runner registry + heartbeats + per-runner queues; task assign
   creates workspace and enqueues; runner daemon polls, runs adapter in
   worktree, runs test command, reports; server marks COMPLETED/FAILED,

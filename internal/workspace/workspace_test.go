@@ -104,3 +104,10 @@ func TestFailedPreservedUntilDestroy(t *testing.T) {
 		t.Fatal("failed workspace vanished")
 	}
 }
+
+func TestPathsAbsolute(t *testing.T) {
+	m := NewManager("relative-root")
+	if !filepath.IsAbs(m.Root) {
+		t.Fatalf("root = %q, want absolute", m.Root)
+	}
+}

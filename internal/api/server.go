@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ballast/internal/auth"
+	"ballast/internal/changeset"
 	"ballast/internal/events"
 	"ballast/internal/telemetry"
 )
@@ -34,6 +35,7 @@ type ProjectService interface {
 	Create(name, repo, branch string) (any, error)
 	Get(id string) (any, error)
 	Head(id string) (string, error)
+	SetHead(id, sha string) error
 }
 type TaskService interface {
 	Create(projectID, title, desc string, scopes []string) (any, error)
@@ -53,6 +55,8 @@ type ChangesetService interface {
 	Build(projectID, taskID, agentID, wsID string) (any, error)
 	Get(id string) (any, error)
 	Decide(id, decision, actor string) (any, error)
+	List(projectID string) ([]changeset.Changeset, error)
+	Mark(id string, status changeset.Status) (changeset.Changeset, error)
 }
 
 // New builds routes. Health/readiness stay unauthenticated for probes.
@@ -76,6 +80,7 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s.mux.HandleFunc("POST /workspaces/{id}/changesets", s.requireAuth(s.buildChangeset))
 	s.mux.HandleFunc("GET /changesets/{id}", s.requireAuth(s.getChangeset))
 	s.mux.HandleFunc("POST /changesets/{id}/decision", s.requireAuth(s.decideChangeset))
+	s.mux.HandleFunc("POST /changesets/{id}/integrate", s.requireAuth(s.integrate))
 	s.mux.HandleFunc("POST /runners", s.requireAuth(s.registerRunner))
 	s.mux.HandleFunc("POST /runners/{id}/heartbeat", s.requireAuth(s.heartbeat))
 	s.mux.HandleFunc("GET /runners/{id}/work", s.requireAuth(s.pollWork))

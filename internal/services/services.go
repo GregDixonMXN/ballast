@@ -32,6 +32,7 @@ type Repo interface {
 
 	SaveChangeset(ctx context.Context, c changeset.Changeset) error
 	GetChangeset(ctx context.Context, id string) (changeset.Changeset, error)
+	ListChangesets(ctx context.Context, projectID string) ([]changeset.Changeset, error)
 }
 
 // Projects owns project records; canonical head moves only via integration.

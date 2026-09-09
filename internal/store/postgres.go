@@ -280,6 +280,36 @@ FROM changesets WHERE id=$1`, id).Scan(
 	return c, nil
 }
 
+func (p *PGRepo) ListChangesets(ctx context.Context, projectID string) ([]changeset.Changeset, error) {
+	rows, err := p.db.QueryContext(ctx, `
+SELECT id, project_id, task_id, agent_id, base_commit, files, diff, test_ref, status, created_at
+FROM changesets WHERE project_id=$1 ORDER BY created_at`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []changeset.Changeset
+	for rows.Next() {
+		var c changeset.Changeset
+		var files []byte
+		var status string
+		var agent sql.NullString
+		if err := rows.Scan(&c.ID, &c.ProjectID, &c.TaskID, &agent, &c.Base, &files,
+			&c.Diff, &c.TestRef, &status, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		c.Status = changeset.Status(status)
+		if agent.Valid {
+			c.AgentID = agent.String
+		}
+		if err := parseList(files, &c.Files); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // PGEventStore persists events; memory store remains the no-DB default.
 type PGEventStore struct {
 	db *sql.DB

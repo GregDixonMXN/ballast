@@ -50,7 +50,16 @@ type Manager struct {
 }
 
 // NewManager roots worktrees at root (runner-owned, disposable).
-func NewManager(root string) *Manager { return &Manager{Root: root, ws: map[string]*Workspace{}} }
+// The root is absolutized: worktree paths are stored absolute so they
+// resolve identically for git (which anchors relative paths at the
+// repo) and for the server (which anchors at its own cwd). Relative
+// paths silently split those two and break diffs, builds, and merges.
+func NewManager(root string) *Manager {
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return &Manager{Root: root, ws: map[string]*Workspace{}}
+}
 
 // Create pins base HEAD and adds a detached worktree. Emits no events
 // itself — the API layer publishes workspace.created/ready.

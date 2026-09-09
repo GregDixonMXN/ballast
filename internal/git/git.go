@@ -30,6 +30,12 @@ func Head(ctx context.Context, repo string, ref string) (string, error) {
 	return run(ctx, repo, "rev-parse", ref)
 }
 
+// Show returns the blob bytes of rev:path (e.g. "main:a.go") without
+// touching any working tree.
+func Show(ctx context.Context, repo, rev string) (string, error) {
+	return run(ctx, repo, "show", rev)
+}
+
 // Branch lists the current branch name.
 func Branch(ctx context.Context, repo string) (string, error) {
 	return run(ctx, repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -82,7 +88,9 @@ func StatusPorcelain(ctx context.Context, dir string) ([]string, error) {
 }
 
 // DiffBase returns the unified diff of worktree against base commit,
-// including untracked files content.
+// including untracked files content. The result always ends with a
+// newline when non-empty: git apply rejects patches whose final line
+// is unterminated as corrupt.
 func DiffBase(ctx context.Context, dir, base string) (string, error) {
 	out, err := run(ctx, dir, "diff", base, "--", ".")
 	if err != nil {
@@ -105,6 +113,9 @@ func DiffBase(ctx context.Context, dir, base string) (string, error) {
 			}
 		}
 		out += "\n" + d
+	}
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
 	}
 	return out, nil
 }

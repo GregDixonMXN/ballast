@@ -136,3 +136,16 @@ func (m *MemoryRepo) GetChangeset(_ context.Context, id string) (changeset.Chang
 	}
 	return c, nil
 }
+
+func (m *MemoryRepo) ListChangesets(_ context.Context, projectID string) ([]changeset.Changeset, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []changeset.Changeset
+	for _, c := range m.cs {
+		if c.ProjectID == projectID {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
