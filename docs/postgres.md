@@ -31,11 +31,31 @@ with known credentials). Memory mode is the local default here.
 
 - Postgres 16 (docker compose postgres service, or native) with
   db/user/password `ballast`, reachable at
-  `postgres://ballast:ballast@localhost:5432/ballast?sslmode=disable`.
+  `postgres://ballast:***@localhost:5432/ballast?sslmode=disable`.
 - `export DATABASE_URL=<that>` then `go test -count=1 ./...` — the
   round-trip test in internal/store runs instead of skipping.
 - Persistence proof: boot server, create project, kill, reboot, project
   still listed.
+
+## This Linux machine (dev desktop, verified 2026-09-09)
+
+- A system Postgres already listens on 127.0.0.1:5432 (password-locked,
+  not ours). Do NOT fight it: our container maps host port 5433.
+- Container `ballast-pg` (postgres:16-alpine, named volume not used —
+  recreate with the same command if missing):
+  `docker run -d --name ballast-pg -e POSTGRES_USER=ballast
+  -e POSTGRES_PASSWORD=ballast -e POSTGRES_DB=ballast
+  -p 127.0.0.1:5433:5432 postgres:16-alpine`
+- `export DATABASE_URL='postgres://ballast:ballast@localhost:5433/ballast?sslmode=disable'`
+- Go: system go is 1.22.2, module needs 1.23 (and toolchain download
+  fails). Go 1.23.3 tarball kept at `~/go1.23.3.linux-amd64.tar.gz`;
+  extract and prepend its `go/bin` to PATH.
+- Fixed 2026-09-09: `TestPostgresRoundTrip` used hardcoded IDs `"w1"`/`"c1"`
+  but id columns are UUID. The app generates real UUIDs everywhere
+  (google/uuid), so the test was wrong, not the schema — it now uses
+  `uuid.NewString()`. Full `go test ./...` green against the container.
+- Persistence proof done here: created project `persist-demo` via the API,
+  killed the server, rebooted, `GET /projects/{id}` returned it.
 
 ## CI
 
