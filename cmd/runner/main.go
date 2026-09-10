@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"ballast/internal/agent"
+	"ballast/internal/agentloop"
 	"ballast/internal/api"
 	"ballast/internal/runner"
 	"ballast/internal/telemetry"
@@ -36,6 +37,9 @@ func main() {
 	name := flag.String("name", "", "runner hostname override")
 	agentBin := flag.String("agent", os.Getenv("AGENT_BIN"), "custom agent binary (extra adapter)")
 	agentHome := flag.String("agent-home", "", "explicit dedicated agent login/config home (read/write by agents); default disposable unauthenticated home")
+	modelKeyFile := flag.String("model-key-file", "", "API key file enabling the in-process tool-loop adapter (reads key once at startup, never logged)")
+	modelName := flag.String("model", "muse-spark-1.3", "model id for the tool-loop adapter")
+	modelBaseURL := flag.String("model-base-url", "https://api.meta.ai/v1", "OpenAI-compatible base URL for the tool-loop adapter")
 	once := flag.Bool("once", false, "poll once and exit")
 	flag.Parse()
 	if *showVersion {
@@ -58,6 +62,18 @@ func main() {
 	adapters := agent.Registry(nil)
 	if *agentBin != "" {
 		adapters = append(adapters, agent.NewShell("custom", *agentBin, nil))
+	}
+	if *modelKeyFile != "" {
+		key, err := auth.ReadCredential(*modelKeyFile)
+		if err != nil {
+			log.Fatalf("model key: %v", err)
+		}
+		adapters = append(adapters, agentloop.NewLoop("loop", agentloop.LoopConfig{
+			Model: agentloop.Config{BaseURL: *modelBaseURL, APIKey: key, Model: *modelName},
+			OnTurn: func(s string) {
+				log.Printf("loop: %s", s)
+			},
+		}))
 	}
 	if *agentHome != "" {
 		absolute, err := filepath.Abs(*agentHome)
