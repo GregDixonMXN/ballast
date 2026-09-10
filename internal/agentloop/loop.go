@@ -103,6 +103,11 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 		msgs = append(msgs, reply)
 		if len(reply.ToolCalls) == 0 {
 			text := strings.TrimSpace(reply.Content)
+			if text == "" {
+				// Fail closed: an empty finish proves nothing and must
+				// never pass the test gate on an unverified tree.
+				return done(id, taskID, workspace, started, log.String(), "", 2, "model finished with empty summary; work unverifiable"), nil
+			}
 			turn("turn %d: model finished: %s", t, truncate(text, 500))
 			return done(id, taskID, workspace, started, log.String(), text, 0, ""), nil
 		}

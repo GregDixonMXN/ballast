@@ -127,6 +127,12 @@ func runTest(ctx context.Context, dir, command string) (exit int, output string)
 	}
 	defer os.RemoveAll(home)
 	cmd.Env = append(cmd.Env, "HOME="+home)
+	// Toolchain roots live in the operator's real home; a bare HOME
+	// override orphans them (rustup: "no default toolchain", go: cold
+	// module cache). Pass them through explicitly, resolved when unset.
+	for _, kv := range toolchainEnv() {
+		cmd.Env = append(cmd.Env, kv)
+	}
 	var buf executil.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -137,6 +143,26 @@ func runTest(ctx context.Context, dir, command string) (exit int, output string)
 		return -1, buf.String() + "\n" + err.Error()
 	}
 	return 0, buf.String()
+}
+
+// toolchainEnv passes language-toolchain roots into the scrubbed test
+// environment, resolving defaults from the runner's real home when the
+// operator hasn't set them explicitly.
+func toolchainEnv() []string {
+	var out []string
+	add := func(key, def string) {
+		if v := os.Getenv(key); v != "" {
+			out = append(out, key+"="+v)
+			return
+		}
+		if home, err := os.UserHomeDir(); err == nil && def != "" {
+			out = append(out, key+"="+filepath.Join(home, def))
+		}
+	}
+	add("RUSTUP_HOME", ".rustup")
+	add("CARGO_HOME", ".cargo")
+	add("GOPATH", "go")
+	return out
 }
 
 // Executor runs one work item through an adapter and reports it.

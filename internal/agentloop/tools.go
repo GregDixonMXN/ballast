@@ -122,16 +122,20 @@ func NewRegistry(gate Gate) *Registry {
 			sort.Strings(names)
 			return strings.Join(names, "\n"), nil
 		})
-	r.add("run_shell", "Run a command (no shell interpolation: argv split on spaces) in the worktree. For builds, tests, grep-like inspection. Timeout 120s, output capped.",
+	r.add("run_shell", "Run a command in the worktree via sh -c (quoting allowed). For builds, tests, file inspection. Timeout 120s, output capped.",
 		obj(map[string]any{"command": str("Command line, e.g. \"cargo test --workspace\"")}, "command"),
 		func(ctx context.Context, wd string, args map[string]any) (string, error) {
-			fields := strings.Fields(stringArg(args, "command"))
-			if len(fields) == 0 {
+			line := strings.TrimSpace(stringArg(args, "command"))
+			if line == "" {
 				return "", fmt.Errorf("empty command")
 			}
 			tctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(tctx, fields[0], fields[1:]...)
+			// sh -c, not argv splitting: the model writes quoted commands
+			// and naive field-splitting mangles them. The model is already
+			// trusted with write_file inside this worktree; the shell adds
+			// no new privilege, only correct quoting.
+			cmd := exec.CommandContext(tctx, "sh", "-c", line)
 			cmd.Dir = wd
 			out, err := cmd.CombinedOutput()
 			if len(out) > 60000 {
