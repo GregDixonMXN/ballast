@@ -86,6 +86,20 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// FinishOf returns the first choice's finish reason, if any.
+func (r chatResponse) FinishOf() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return r.Choices[0].Finish
+}
+
+// Reply is one model turn: the message plus its finish reason.
+type Reply struct {
+	Message chatMessage
+	Finish  string
+}
+
 // Client speaks OpenAI-compatible chat completions with function tools.
 type Client struct {
 	cfg Config
@@ -96,47 +110,47 @@ func NewClient(cfg Config) *Client { return &Client{cfg: cfg.withDefaults()} }
 // Complete sends the conversation and returns the assistant's message.
 // Transport errors and API error bodies are both Go errors with the key
 // redacted (the key never appears in requests bodies we log).
-func (c *Client) Complete(ctx context.Context, msgs []chatMessage, tools []chatTool) (chatMessage, error) {
+func (c *Client) Complete(ctx context.Context, msgs []chatMessage, tools []chatTool) (Reply, error) {
 	body, err := json.Marshal(chatRequest{
 		Model:       c.cfg.Model,
 		Messages:    msgs,
 		Tools:       tools,
 		ToolChoice:  "auto",
-		MaxTokens:   4096,
+		MaxTokens:   16384,
 		Temperature: 0.2,
 	})
 	if err != nil {
-		return chatMessage{}, err
+		return Reply{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", c.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return chatMessage{}, err
+		return Reply{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	res, err := c.cfg.HTTP.Do(req)
 	if err != nil {
-		return chatMessage{}, fmt.Errorf("model transport: %w", err)
+		return Reply{}, fmt.Errorf("model transport: %w", err)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if err != nil {
-		return chatMessage{}, err
+		return Reply{}, err
 	}
 	if res.StatusCode >= 400 {
-		return chatMessage{}, fmt.Errorf("model HTTP %d: %s", res.StatusCode, firstLine(raw))
+		return Reply{}, fmt.Errorf("model HTTP %d: %s", res.StatusCode, firstLine(raw))
 	}
 	var out chatResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return chatMessage{}, fmt.Errorf("model decode: %w", err)
+		return Reply{}, fmt.Errorf("model decode: %w", err)
 	}
 	if out.Error != nil {
-		return chatMessage{}, fmt.Errorf("model API: %s", out.Error.Message)
+		return Reply{}, fmt.Errorf("model API: %s", out.Error.Message)
 	}
 	if len(out.Choices) == 0 {
-		return chatMessage{}, fmt.Errorf("model returned no choices")
+		return Reply{}, fmt.Errorf("model returned no choices")
 	}
-	return out.Choices[0].Message, nil
+	return Reply{Message: out.Choices[0].Message, Finish: out.FinishOf()}, nil
 }
 
 func firstLine(b []byte) string {

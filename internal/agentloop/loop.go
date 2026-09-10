@@ -100,9 +100,18 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 		if err != nil {
 			return done(id, taskID, workspace, started, log.String(), "", 1, "model call failed on turn %d: %v", t, err), nil
 		}
-		msgs = append(msgs, reply)
-		if len(reply.ToolCalls) == 0 {
-			text := strings.TrimSpace(reply.Content)
+		msg := reply.Message
+		msgs = append(msgs, msg)
+		// Reasoning models can burn the output budget thinking and come
+		// back length-cut with no content and no calls. Nudge to continue
+		// instead of scoring an empty finish.
+		if len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) == "" && reply.Finish == "length" {
+			turn("turn %d: output cut by length limit, asking model to continue", t)
+			msgs = append(msgs, chatMessage{Role: "user", Content: "Your reply was cut off. Continue exactly where you left off."})
+			continue
+		}
+		if len(msg.ToolCalls) == 0 {
+			text := strings.TrimSpace(msg.Content)
 			if text == "" {
 				// Fail closed: an empty finish proves nothing and must
 				// never pass the test gate on an unverified tree.
@@ -111,8 +120,8 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 			turn("turn %d: model finished: %s", t, truncate(text, 500))
 			return done(id, taskID, workspace, started, log.String(), text, 0, ""), nil
 		}
-		turn("turn %d: %d tool call(s)", t, len(reply.ToolCalls))
-		for _, tc := range reply.ToolCalls {
+		turn("turn %d: %d tool call(s)", t, len(msg.ToolCalls))
+		for _, tc := range msg.ToolCalls {
 			var args map[string]any
 			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 				args = map[string]any{}
