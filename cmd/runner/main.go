@@ -64,7 +64,7 @@ func main() {
 		adapters = append(adapters, agent.NewShell("custom", *agentBin, nil))
 	}
 	if *modelKeyFile != "" {
-		key, err := auth.ReadCredential(*modelKeyFile)
+		key, err := readAPIKeyFile(*modelKeyFile)
 		if err != nil {
 			log.Fatalf("model key: %v", err)
 		}
@@ -181,4 +181,26 @@ func main() {
 			doPoll()
 		}
 	}
+}
+
+// readAPIKeyFile reads an opaque model API key: 0600 regular file,
+// trimmed, length-checked. Unlike auth.ReadCredential it accepts any
+// key format — model keys are not hex operator tokens.
+func readAPIKeyFile(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return "", fmt.Errorf("key file must be a private regular file (0600)")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	key := strings.TrimSpace(string(raw))
+	if len(key) < 16 || len(key) > 4096 {
+		return "", fmt.Errorf("key file holds no plausible API key")
+	}
+	return key, nil
 }
