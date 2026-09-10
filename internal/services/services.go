@@ -286,6 +286,19 @@ func (s *Workspaces) SetStatus(id, status string) (any, error) {
 	return updated, nil
 }
 
+// SetReport persists a completion report (status + evidence) in one step.
+func (s *Workspaces) SetReport(id, status string, exit int, stdout, stderr string, testExit int) (any, error) {
+	ctx := context.Background()
+	updated, err := s.Mgr.SetReport(id, workspace.Status(status), exit, stdout, stderr, testExit)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Repo.SaveWorkspace(ctx, *updated); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 func (s *Workspaces) List(projectID string) ([]any, error) {
 	list, err := s.Repo.ListWorkspaces(context.Background(), projectID)
 	if err != nil {

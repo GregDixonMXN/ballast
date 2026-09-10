@@ -76,7 +76,11 @@ CREATE TABLE IF NOT EXISTS workspaces (
   path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'CREATING',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_exit INT NOT NULL DEFAULT 0,
+  last_stdout TEXT NOT NULL DEFAULT '',
+  last_stderr TEXT NOT NULL DEFAULT '',
+  last_test_exit INT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_workspaces_project ON workspaces(project_id);
 

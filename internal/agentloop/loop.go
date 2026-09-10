@@ -125,11 +125,18 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 			if strings.TrimSpace(result) == "" {
 				result = "(empty result)"
 			}
+			// The transcript log keeps everything; the model only gets
+			// the tail. Full command output in-context burns the window
+			// and buries the signal (a `cargo test` dump ended a run).
+			modelResult := result
+			if len(modelResult) > 4000 {
+				modelResult = "...[earlier output in transcript]...\n" + modelResult[len(modelResult)-4000:]
+			}
 			turn("  %s -> %s", tc.Function.Name, truncate(strings.TrimSpace(result), 300))
 			msgs = append(msgs, chatMessage{
 				Role:       "tool",
 				ToolCallID: tc.ID,
-				Content:    result,
+				Content:    modelResult,
 			})
 		}
 	}

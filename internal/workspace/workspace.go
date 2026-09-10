@@ -42,6 +42,12 @@ type Workspace struct {
 	Status    Status    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Last report from the runner: never secrets, always evidence.
+	// Populated on completion so a FAILED workspace explains itself.
+	LastExit   int    `json:"last_exit,omitempty"`
+	LastStdout string `json:"last_stdout,omitempty"`
+	LastStderr string `json:"last_stderr,omitempty"`
+	LastTest   int    `json:"last_test_exit,omitempty"`
 }
 
 // Manager creates worktrees under Root and tracks them.
@@ -114,7 +120,40 @@ func (m *Manager) SetStatus(id string, s Status) (*Workspace, error) {
 	return &copy, nil
 }
 
-// ChangedFiles lists worktree modifications vs its base commit.
+// SetReport records the runner's outcome on the workspace: status plus
+// the evidence (exit codes, capped transcript). Oldest fix for silent
+// failures — a FAILED workspace must explain itself on read.
+func (m *Manager) SetReport(id string, s Status, exit int, stdout, stderr string, testExit int) (*Workspace, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.ws[id]
+	if !ok {
+		return nil, fmt.Errorf("unknown workspace %s", id)
+	}
+	if w.Status == Destroyed {
+		return nil, fmt.Errorf("workspace destroyed")
+	}
+	switch s {
+	case Creating, Ready, Running, Waiting, Completed, Failed, Conflicted, Destroyed:
+	default:
+		return nil, fmt.Errorf("unknown workspace status %s", s)
+	}
+	w.Status = s
+	w.UpdatedAt = time.Now().UTC()
+	w.LastExit = exit
+	w.LastStdout = capStr(stdout, 20000)
+	w.LastStderr = capStr(stderr, 8000)
+	w.LastTest = testExit
+	copy := *w
+	return &copy, nil
+}
+
+func capStr(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "\n...[truncated]"
+	}
+	return s
+}
 func (m *Manager) ChangedFiles(ctx context.Context, id string) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

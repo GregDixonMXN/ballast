@@ -54,6 +54,7 @@ type WorkspaceService interface {
 	Create(projectID, taskID, repo string) (any, error)
 	Get(id string) (any, error)
 	SetStatus(id, status string) (any, error)
+	SetReport(id, status string, exit int, stdout, stderr string, testExit int) (any, error)
 	List(projectID string) ([]any, error)
 	ChangedFiles(id string) ([]string, error)
 	Diff(id string) (string, error)

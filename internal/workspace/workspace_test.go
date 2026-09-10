@@ -28,6 +28,31 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
+func TestSetReportPersistsEvidence(t *testing.T) {
+	m := NewManager(t.TempDir())
+	w, err := m.Create(context.Background(), "p1", "t1", initRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := make([]byte, 30000)
+	for i := range long {
+		long[i] = 'x'
+	}
+	got, err := m.SetReport(w.ID, Failed, 1, string(long), "boom", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != Failed || got.LastExit != 1 || got.LastStderr != "boom" || got.LastTest != 3 {
+		t.Fatalf("report = %+v", got)
+	}
+	if len(got.LastStdout) > 21000 {
+		t.Fatalf("stdout not capped: %d", len(got.LastStdout))
+	}
+	if _, err := m.SetReport(w.ID, "BOGUS", 0, "", "", 0); err == nil {
+		t.Fatal("bogus status accepted")
+	}
+}
+
 func TestCreateIsolated(t *testing.T) {
 	ctx := context.Background()
 	repo := initRepo(t)

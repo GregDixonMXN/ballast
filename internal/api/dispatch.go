@@ -275,7 +275,11 @@ func (s *Server) reportResults(w http.ResponseWriter, r *http.Request) {
 	if in.ExitCode != 0 || (in.TestRan && in.TestExit != 0) {
 		status = workspace.Failed
 	}
-	updated, err := s.Workspaces.SetStatus(ws.ID, string(status))
+	testExit := 0
+	if in.TestRan {
+		testExit = in.TestExit
+	}
+	updated, err := s.Workspaces.SetReport(ws.ID, string(status), in.ExitCode, in.Stdout, in.Stderr, testExit)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

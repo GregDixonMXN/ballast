@@ -187,12 +187,14 @@ FROM tasks WHERE project_id=$1 ORDER BY created_at`, projectID)
 
 func (p *PGRepo) SaveWorkspace(ctx context.Context, w workspace.Workspace) error {
 	_, err := p.db.ExecContext(ctx, `
-INSERT INTO workspaces(id, project_id, task_id, agent_id, runner_id, repo_path, base_commit, path, status, created_at, updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+INSERT INTO workspaces(id, project_id, task_id, agent_id, runner_id, repo_path, base_commit, path, status, created_at, updated_at, last_exit, last_stdout, last_stderr, last_test_exit)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (id) DO UPDATE SET agent_id=EXCLUDED.agent_id, runner_id=EXCLUDED.runner_id,
-status=EXCLUDED.status, updated_at=EXCLUDED.updated_at`,
-		w.ID, w.ProjectID, w.TaskID, nullUUID(w.AgentID), nullUUID(w.RunnerID),
-		w.RepoPath, w.Base, w.Path, string(w.Status), w.CreatedAt, w.UpdatedAt)
+status=EXCLUDED.status, updated_at=EXCLUDED.updated_at, last_exit=EXCLUDED.last_exit,
+last_stdout=EXCLUDED.last_stdout, last_stderr=EXCLUDED.last_stderr, last_test_exit=EXCLUDED.last_test_exit`,
+	w.ID, w.ProjectID, w.TaskID, nullUUID(w.AgentID), nullUUID(w.RunnerID),
+	w.RepoPath, w.Base, w.Path, string(w.Status), w.CreatedAt, w.UpdatedAt,
+	w.LastExit, w.LastStdout, w.LastStderr, w.LastTest)
 	return err
 }
 
@@ -212,7 +214,8 @@ func scanWorkspace(row *sql.Row) (workspace.Workspace, error) {
 	var status string
 	var agent, runner sql.NullString
 	err := row.Scan(&w.ID, &w.ProjectID, &w.TaskID, &agent, &runner,
-		&w.RepoPath, &w.Base, &w.Path, &status, &w.CreatedAt, &w.UpdatedAt)
+		&w.RepoPath, &w.Base, &w.Path, &status, &w.CreatedAt, &w.UpdatedAt,
+		&w.LastExit, &w.LastStdout, &w.LastStderr, &w.LastTest)
 	if err != nil {
 		return workspace.Workspace{}, err
 	}
@@ -228,7 +231,7 @@ func scanWorkspace(row *sql.Row) (workspace.Workspace, error) {
 
 func (p *PGRepo) GetWorkspace(ctx context.Context, id string) (workspace.Workspace, error) {
 	w, err := scanWorkspace(p.db.QueryRowContext(ctx, `
-SELECT id, project_id, task_id, agent_id, runner_id, repo_path, base_commit, path, status, created_at, updated_at
+SELECT id, project_id, task_id, agent_id, runner_id, repo_path, base_commit, path, status, created_at, updated_at, last_exit, last_stdout, last_stderr, last_test_exit
 FROM workspaces WHERE id=$1`, id))
 	if err == sql.ErrNoRows {
 		return workspace.Workspace{}, fmt.Errorf("unknown workspace %s", id)
@@ -238,7 +241,7 @@ FROM workspaces WHERE id=$1`, id))
 
 func (p *PGRepo) ListWorkspaces(ctx context.Context, projectID string) ([]workspace.Workspace, error) {
 	rows, err := p.db.QueryContext(ctx, `
-SELECT id, project_id, task_id, agent_id, runner_id, repo_path, base_commit, path, status, created_at, updated_at
+SELECT id, project_id, task_id, agent_id, runner_id, repo_path, base_commit, path, status, created_at, updated_at, last_exit, last_stdout, last_stderr, last_test_exit
 FROM workspaces WHERE project_id=$1 ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -250,7 +253,8 @@ FROM workspaces WHERE project_id=$1 ORDER BY created_at`, projectID)
 		var status string
 		var agent, runner sql.NullString
 		if err := rows.Scan(&w.ID, &w.ProjectID, &w.TaskID, &agent, &runner,
-			&w.RepoPath, &w.Base, &w.Path, &status, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			&w.RepoPath, &w.Base, &w.Path, &status, &w.CreatedAt, &w.UpdatedAt,
+			&w.LastExit, &w.LastStdout, &w.LastStderr, &w.LastTest); err != nil {
 			return nil, err
 		}
 		w.Status = workspace.Status(status)
