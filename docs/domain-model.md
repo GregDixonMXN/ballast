@@ -1,32 +1,25 @@
 # Domain model
 
-Postgres is coordination truth; Git is execution truth. Worktrees are
-disposable; history is not.
+The local store or PostgreSQL holds coordination records. Git holds repository
+objects, branch refs, and worktree state. Neither is a substitute for the other.
 
-- Organization 1→* User, Project
-- Project 1→1 Repository path + branch + canonical SHA (head moves only
-  via controlled integration)
-- Project 1→* Task (status TODO→RUNNING→BLOCKED→REVIEW→DONE, guarded
-  transitions), Task 1→* Workspace over time, 1 active in MVP
-- Workspace: task + agent + runner + repo + base commit + path + status
-  (CREATING→READY→RUNNING→WAITING→COMPLETED→FAILED→CONFLICTED→DESTROYED).
-  Failed workspaces persist until explicit destroy.
-- WorkspaceLease: owner + path pattern + active window. Overlap warns.
-- AgentInstance: provider (codex/claude/shell/custom) + label + active.
-  Execution records: command argv, stdout/stderr, exit, timestamps.
-- Changeset: task + agent + base + files + diff + test ref + status
-  (DRAFT→IN_REVIEW→APPROVED/REJECTED→MERGED, or NEEDS_REBASE/CONFLICTED).
-- Conflict: project + workspaces + kind (SAME_FILE/SAME_REGION/
-  STALE_BASE/INTEGRATE_CONFLICT/SCOPE_OVERLAP now; SYMBOL/API_CONTRACT/
-  SCHEMA/DEPENDENCY/SEMANTIC later) + severity + files + reason +
-  action + status.
-- Review/Approval: changeset + reviewer + decision + rationale.
-- Build/TestRun: changeset + runner + command + result + logs ref.
-- Event: id + project + actor (type+id) + type + entity + timestamp +
-  metadata. Persisted; UI streams them.
-- AuditEntry: like events, but only for sensitive actions (auth changes,
-  approvals, merges, secret access, deploys).
-- Environment/Deployment: skeletal until preview envs land (name, project,
-  changeset, status, url, rollback target).
+| Entity | Principal fields / behavior |
+| --- | --- |
+| Project | Local repository path, canonical branch, recorded SHA |
+| Task | Project, title/description, scope hints, guarded lifecycle |
+| Workspace | Project/task identity, absolute worktree path, base SHA, status |
+| Changeset | Project/task/workspace result, exact patch, files, review status |
+| Runner | Registered local worker, heartbeat/capabilities, process-local dispatch |
+| Event | Project/actor/type/entity/timestamp and JSON metadata |
 
-See `migrations/0001_init.sql` for the exact schema.
+Task states are TODO, RUNNING, BLOCKED, REVIEW, DONE; transitions are constrained,
+not an arbitrary linear chain. Review states include IN_REVIEW, APPROVED, REJECTED,
+MERGED, NEEDS_REBASE, and CONFLICTED. A review approval does not advance a branch.
+
+Failed/interrupted workspaces are retained for inspection. Git worktrees contain
+working data and must be included with their repository in a backup. They are not
+safe to discard merely because a coordination record exists.
+
+The SQL schema also contains future-facing tables. Their presence does not imply
+a working organization UI, deployment service, secrets broker, build-artifact
+system, or compliance audit pipeline. See the [roadmap](roadmap.md).

@@ -1,19 +1,18 @@
-# Events
+# Events and activity
 
-Typed, persisted, streamed. Types (stable, append-only):
+`GET /activity?project=<id>` returns recent persisted operational history.
+`GET /events?project=<id>` streams new events using SSE. Both require bearer
+authentication; credentials must stay in headers, never URL query parameters.
+The dashboard may poll authenticated state/history rather than using EventSource,
+which cannot set an Authorization header directly.
 
-project.created, task.created, task.assigned, workspace.created,
-workspace.ready, workspace.destroyed, agent.started, agent.stopped,
-agent.message, file.changed, changeset.created, test.started,
-test.failed, test.passed, conflict.detected, review.requested,
-approval.granted, approval.rejected, merge.completed.
+Event fields: id, project_id, actor_type, actor_id, type, entity_id, at, metadata.
+Implemented workflows emit project/task/workspace, execution/test, review, and
+integration events. The event type declarations also include future-facing types;
+the presence of a constant is not evidence that every path emits it.
 
-Record: id, project_id, actor_type (human|agent|system), actor_id,
-type, entity_id, at, metadata (JSON).
-
-Transport: `internal/events.Bus` (Publish/Subscribe). MVP = in-process
-fan-out + Postgres persistence. NATS JetStream replaces the transport
-later: subject `ballast.project.<id>`, durable consumer per projection
-(feed, conflict detector, audit exporter). REST `GET /events` upgrades
-to SSE (`GET /events?project=`); clients fetch history via list
-endpoints and stay current on the stream.
+The bus persists through the configured store and fans out within one process.
+SSE does not replay missed history: reconnecting clients should refetch current
+state/activity. Events are not a complete transactional compliance audit, a durable
+work queue, or an exactly-once distributed message bus. Keep that distinction when
+building consumers or interpreting a missing/duplicate event after a failure.

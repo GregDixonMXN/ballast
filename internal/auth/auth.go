@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -86,4 +88,71 @@ func (t *Tokens) Parse(header string) (Identity, error) {
 		return Identity{}, errors.New("unauthorized")
 	}
 	return id, nil
+}
+
+// LoadOperator loads a private, persistent local operator credential. New files
+// are created exclusively; credentials are never returned in logs.
+func (t *Tokens) LoadOperator(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	if info, e := os.Lstat(path); e == nil && (!info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0) {
+		return errors.New("operator token must be a private regular file (0600)")
+	}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		raw := make([]byte, 32)
+		if _, err = rand.Read(raw); err != nil {
+			return err
+		}
+		b = []byte(hex.EncodeToString(raw))
+		f, e := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if e != nil {
+			return e
+		}
+		_, err = f.Write(b)
+		if e = f.Close(); err == nil {
+			err = e
+		}
+	}
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("operator token must be a private regular file (0600)")
+	}
+	tok := strings.TrimSpace(string(b))
+	decoded, err := hex.DecodeString(tok)
+	if err != nil || len(decoded) != 32 {
+		return errors.New("invalid operator token file")
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.t[tok] = Identity{ID: "operator", Kind: "human", Roles: []string{"admin"}}
+	return nil
+}
+
+// ReadCredential checks file type and permissions before reading any bytes.
+func ReadCredential(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return "", errors.New("credential must be a private regular file (0600)")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	tok := strings.TrimSpace(string(b))
+	raw, err := hex.DecodeString(tok)
+	if err != nil || len(raw) != 32 {
+		return "", errors.New("invalid credential file")
+	}
+	return tok, nil
 }

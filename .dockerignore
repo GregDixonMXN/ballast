@@ -1,0 +1,13 @@
+.git
+.ballast*
+.demo-*
+.env*
+*.token
+.auth-edit.py
+.go-releases.json
+bin
+dist
+**/node_modules
+**/.next
+**/test-results
+**/playwright-report

@@ -1,23 +1,21 @@
-GO := go
-LINT := golangci-lint
-
-.PHONY: dev test lint build tidy demo
+GO ?= go
+export GO
+.PHONY: dev test check build package demo
 
 dev:
-	bash scripts/dev.sh
+	./scripts/dev.sh
 
 test:
-	$(GO) test ./...
+	$(GO) test -race ./...
 
-lint:
-	$(GO) vet ./...
-	@if command -v $(LINT) >/dev/null 2>&1; then $(LINT) run ./...; fi
+check:
+	./scripts/check.sh
 
 build:
-	$(GO) build ./...
+	./scripts/build.sh
 
-tidy:
-	$(GO) mod tidy
+package:
+	./scripts/package.sh
 
 demo:
-	bash scripts/demo.sh
+	./scripts/demo.sh

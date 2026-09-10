@@ -5,3 +5,15 @@ node_modules/
 .next/
 .env
 *.log
+.ballast/
+.ballast-data/
+dist/
+.env.*
+!.env.example
+*.token
+*.tsbuildinfo
+playwright-report/
+test-results/
+coverage/
+__pycache__/
+*.pyc

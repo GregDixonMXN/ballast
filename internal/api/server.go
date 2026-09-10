@@ -5,9 +5,11 @@
 package api
 
 import (
+	"ballast/internal/project"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"ballast/internal/auth"
@@ -18,12 +20,14 @@ import (
 
 // Server wires handlers to domain services.
 type Server struct {
-	mux      *http.ServeMux
-	bus      events.Bus
-	auth     *auth.Tokens
-	perms    auth.Authorizer
-	count    *telemetry.Counters
-	dispatch *Dispatch
+	mutation   sync.Mutex
+	EventStore events.Store
+	mux        *http.ServeMux
+	bus        events.Bus
+	auth       *auth.Tokens
+	perms      auth.Authorizer
+	count      *telemetry.Counters
+	dispatch   *Dispatch
 	// Services are interfaces so Postgres/memory swap without handler edits.
 	Projects   ProjectService
 	Tasks      TaskService
@@ -32,6 +36,7 @@ type Server struct {
 }
 
 type ProjectService interface {
+	List() ([]project.Project, error)
 	Create(name, repo, branch string) (any, error)
 	Get(id string) (any, error)
 	Head(id string) (string, error)
@@ -66,8 +71,13 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 		dispatch: NewDispatch()}
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /readyz", s.health)
-	s.mux.HandleFunc("GET /metrics", s.metrics)
-	s.mux.HandleFunc("GET /events", s.stream) // ?project=
+	s.mux.HandleFunc("GET /metrics", s.requireAuth(s.metrics))
+	s.mux.HandleFunc("GET /activity", s.requireAuth(s.activity))
+	s.mux.HandleFunc("GET /projects", s.requireAuth(s.listProjects))
+	s.mux.HandleFunc("GET /runners", s.requireAuth(s.listRunners))
+	s.mux.HandleFunc("GET /tasks/{id}", s.requireAuth(s.getTask))
+	s.mux.HandleFunc("GET /projects/{id}/changesets", s.requireAuth(s.listChangesets))
+	s.mux.HandleFunc("GET /events", s.requireAuth(s.stream)) // ?project=
 	s.mux.HandleFunc("POST /projects", s.requireAuth(s.createProject))
 	s.mux.HandleFunc("GET /projects/{id}", s.requireAuth(s.getProject))
 	s.mux.HandleFunc("POST /projects/{id}/tasks", s.requireAuth(s.createTask))
@@ -75,6 +85,7 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s.mux.HandleFunc("POST /tasks/{id}/transition", s.requireAuth(s.transitionTask))
 	s.mux.HandleFunc("POST /projects/{id}/workspaces", s.requireAuth(s.createWorkspace))
 	s.mux.HandleFunc("GET /projects/{id}/workspaces", s.requireAuth(s.listWorkspaces))
+	s.mux.HandleFunc("GET /workspaces/{id}", s.requireAuth(s.getWorkspace))
 	s.mux.HandleFunc("GET /workspaces/{id}/files", s.requireAuth(s.wsFiles))
 	s.mux.HandleFunc("GET /workspaces/{id}/diff", s.requireAuth(s.wsDiff))
 	s.mux.HandleFunc("POST /workspaces/{id}/changesets", s.requireAuth(s.buildChangeset))
@@ -111,12 +122,21 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	fl, _ := w.(http.Flusher)
-	enc := json.NewEncoder(w)
-	_ = enc
+	_, _ = w.Write([]byte(": connected\n\n"))
+	if fl != nil {
+		fl.Flush()
+	}
+	tick := time.NewTicker(15 * time.Second)
+	defer tick.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-tick.C:
+			_, _ = w.Write([]byte(": heartbeat\n\n"))
+			if fl != nil {
+				fl.Flush()
+			}
 		case e := <-ch:
 			b, _ := json.Marshal(e)
 			_, _ = w.Write([]byte("data: " + string(b) + "\n\n"))
@@ -129,9 +149,29 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, err := s.auth.Parse(r.Header.Get("Authorization")); err != nil {
+		ident, err := s.auth.Parse(r.Header.Get("Authorization"))
+		if err != nil {
 			writeJSON(w, 401, map[string]string{"error": "unauthorized"})
 			return
+		}
+		if ident.Kind == "runner" {
+			ownRoute := strings.HasPrefix(r.URL.Path, "/runners/"+ident.ID+"/")
+			statusRoute := strings.HasPrefix(r.URL.Path, "/workspaces/") && strings.HasSuffix(r.URL.Path, "/status")
+			if !ownRoute && !statusRoute {
+				writeJSON(w, 403, map[string]string{"error": "operator capability required"})
+				return
+			}
+			if statusRoute && !s.dispatch.Owns(ident.ID, r.PathValue("id")) {
+				writeJSON(w, 403, map[string]string{"error": "workspace not assigned to runner"})
+				return
+			}
+		} else if r.Method != "GET" && !s.perms.Can(r.Context(), ident, "", "write") {
+			writeJSON(w, 403, map[string]string{"error": "write capability required"})
+			return
+		}
+		if r.Method != "GET" {
+			s.mutation.Lock()
+			defer s.mutation.Unlock()
 		}
 		next(w, r)
 	}

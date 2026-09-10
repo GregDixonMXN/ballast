@@ -1,66 +1,51 @@
 # Architecture
 
-## Why this shape
-
-The product risk is coordination, not distribution. So: one deployable
-control plane (modular monolith), runners as dumb-safe executors, Postgres
-as coordination truth, Git as execution truth, events as the nervous
-system. NATS, Temporal, OpenFGA, K8s all sit behind interfaces we define
-now and adopt when load demands — not before.
+Ballast is a local modular Go control plane with a Next.js operational dashboard.
+It separates **coordination state** (projects/tasks/reviews), **Git state**
+(repository objects, refs, index, worktrees), and **execution** (runner processes).
 
 ## Components
 
-- Control plane (`cmd/server` + `internal/api`): owns projects, tasks,
-  workspaces, changesets, conflicts, reviews, approvals, integrations.
-  REST for state, SSE for live events. No agent code runs here.
-- Runner (`cmd/runner`): registers with control plane, heartbeats,
-  polls for assigned work (outbound-only, no inbound ports), manages
-  worktrees under its root, spawns agent processes with captured
-  stdout/stderr/exit/timestamps, runs tests, reports file changes.
-  MVP runs co-located; protocol already supports remote nodes.
-- Store (`internal/store`): Postgres via database/sql; applies
-  `migrations/*.sql` on boot; memory implementation for tests.
-- Event bus (`internal/events`): typed events, persisted to Postgres,
-  fanned out in-process to SSE subscribers. Interface-compatible with
-  a future NATS JetStream transport (subject-per-project, durable
-  consumer per projection).
-- Agent adapters (`internal/agent`): `Adapter` interface
-  (Name/Available/StartTask/SendMessage/Stop/Status). Shell adapter runs
-  any CLI (codex, claude, custom) with env + cwd sandboxing; Codex and
-  Claude adapters are thin profiles over it. Execution records carry
-  command metadata, never secrets (secrets are env-injected at spawn
-  and redacted in logs/events).
-- Workspace manager (`internal/workspace` over `internal/git`):
-  CREATING→READY→RUNNING→WAITING→COMPLETED→FAILED→CONFLICTED→DESTROYED.
-  Failed workspaces are kept for forensics. Checkpoints = commits.
-- Conflict V1 (`internal/conflict`): same-file overlap, same-region
-  overlap (hunk paths), stale base (workspace base != canonical head),
-  git integration conflicts (test-merge), lease scope overlap.
-  Conflicts are rows, with severity + suggested action.
-- Integration (`internal/integration`): approve → revalidate base →
-  test-merge into throwaway worktree → on clean: fast-forward/merge
-  commit to canonical branch, update head, emit events; on dirty:
-  mark NEEDS_REBASE or CONFLICTED, never force.
+- `cmd/server`: authenticated REST API, activity history and SSE, domain services,
+  state recovery, dispatch, and controlled Git integration.
+- `cmd/runner`: registers using a private operator credential, then uses a scoped
+  runner token to poll and report assigned work. Executes trusted local adapters
+  and test commands with bounded output and cancellation.
+- `cmd/ballast`: private token-file CLI for resource operations and API requests.
+- `apps/web`: responsive dashboard; an in-memory user token reaches a fixed local
+  API through a same-origin server proxy. No operator token is embedded in JS.
+- `internal/store`: atomic local JSON snapshots under a lifetime process lock by
+  default; optional PostgreSQL records and versioned schema migrations.
+- `internal/workspace`: creates detached Git worktrees pinned to the selected
+  canonical branch and reattaches retained workspaces after restart.
+- `internal/changeset`, `internal/git`: capture a reviewable patch relative to the
+  workspace base, including committed edits, untracked files, binary data, and
+  exact filenames without modifying the user's Git index.
+- `internal/integration`: validates the base, applies to a scratch worktree, then
+  advances a canonical branch under a repository lock. Clean checked-out branches
+  are fast-forwarded with their index/files; unattached branches use a ref CAS.
 
-## Data flow (vertical slice)
+## Invariants and boundaries
 
-API request → task → workspace (worktree at base commit) → agent
-execution (captured) → file changes → changeset (diff + tests) →
-review/approve → conflict revalidation → integration → canonical head
-moves → dependents revalidated. Every arrow emits a typed event with
-org/project/task/workspace/agent/runner/trace IDs in structured logs.
+A task belongs to a project; its workspace and review must retain that identity.
+Approval is separate from integration. A stale base becomes NEEDS_REBASE or
+CONFLICTED rather than silently forcing a merge. Dirty canonical worktrees remain
+untouched. Independent external Git writes must be quiescent during integration.
 
-## Security
+The state store and Git do not share one global transaction. Keep consistent
+backups and inspect interrupted operations after a crash. Runner dispatch and
+registrations are process-local; restart blocks interrupted work and does not
+promise exactly-once replay. The supported topology is one server with same-host
+runners and identical absolute paths, not distributed or multi-tenant execution.
 
-Agents are untrusted: separate platform/repo/task/deploy credentials,
-scoped tokens minted per workspace, secrets never logged, args
-validated (no shell string building — argv only), dangerous actions
-behind approval gates, audit log for sensitive operations.
+Worktrees do **not** sandbox host or Git administrative authority. The product is
+for trusted local commands. See [Security](../SECURITY.md) and [Installation](INSTALL.md).
 
-## Observability
+## Request flow
 
-Structured slog with IDs on every record; counters/timings for
-workspace_create_duration, agent_task_duration, process failures,
-active agents/workspaces, conflicts, changesets, integration and test
-outcomes. Trace IDs propagate API→runner→git→tests→integration.
-OTEL SDK wiring is isolated in `internal/telemetry` (stdout for MVP).
+Project → task → detached workspace → local work/runner → changeset → review →
+approval → explicit integration → canonical head → sibling revalidation.
+
+Activity records are operational history, not a complete transactional compliance
+audit. They may include sensitive task text and file metadata. [Events](events.md)
+describes the actual interfaces; roadmap types are not implemented services.

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"ballast/internal/git"
@@ -45,6 +46,7 @@ type Workspace struct {
 
 // Manager creates worktrees under Root and tracks them.
 type Manager struct {
+	mu   sync.Mutex
 	Root string
 	ws   map[string]*Workspace
 }
@@ -68,6 +70,12 @@ func (m *Manager) Create(ctx context.Context, projectID, taskID, repo string) (*
 	if err != nil {
 		return nil, fmt.Errorf("read base: %w", err)
 	}
+	return m.CreateAt(ctx, projectID, taskID, repo, base)
+}
+
+func (m *Manager) CreateAt(ctx context.Context, projectID, taskID, repo, base string) (*Workspace, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	w := &Workspace{ID: uuid.NewString(), ProjectID: projectID, TaskID: taskID,
 		RepoPath: repo, Base: base, Path: filepath.Join(m.Root, uuid.NewString()),
 		Status: Creating, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
@@ -77,11 +85,14 @@ func (m *Manager) Create(ctx context.Context, projectID, taskID, repo string) (*
 	w.Status = Ready
 	w.UpdatedAt = time.Now().UTC()
 	m.ws[w.ID] = w
-	return w, nil
+	copy := *w
+	return &copy, nil
 }
 
 // SetStatus moves lifecycle forward (no skipping from DESTROYED).
 func (m *Manager) SetStatus(id string, s Status) (*Workspace, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	w, ok := m.ws[id]
 	if !ok {
 		return nil, fmt.Errorf("unknown workspace %s", id)
@@ -89,22 +100,35 @@ func (m *Manager) SetStatus(id string, s Status) (*Workspace, error) {
 	if w.Status == Destroyed {
 		return nil, fmt.Errorf("workspace destroyed")
 	}
+	switch s {
+	case Creating, Ready, Running, Waiting, Completed, Failed, Conflicted, Destroyed:
+	default:
+		return nil, fmt.Errorf("unknown workspace status %s", s)
+	}
+	if (w.Status == Completed || w.Status == Failed || w.Status == Conflicted) && s != w.Status && s != Destroyed {
+		return nil, fmt.Errorf("terminal workspace cannot resume")
+	}
 	w.Status = s
 	w.UpdatedAt = time.Now().UTC()
-	return w, nil
+	copy := *w
+	return &copy, nil
 }
 
 // ChangedFiles lists worktree modifications vs its base commit.
 func (m *Manager) ChangedFiles(ctx context.Context, id string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	w, ok := m.ws[id]
 	if !ok {
 		return nil, fmt.Errorf("unknown workspace %s", id)
 	}
-	return git.StatusPorcelain(ctx, w.Path)
+	return git.ChangedBase(ctx, w.Path, w.Base)
 }
 
 // Diff returns the full unified diff vs base (for changesets/review).
 func (m *Manager) Diff(ctx context.Context, id string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	w, ok := m.ws[id]
 	if !ok {
 		return "", fmt.Errorf("unknown workspace %s", id)
@@ -115,6 +139,8 @@ func (m *Manager) Diff(ctx context.Context, id string) (string, error) {
 // Checkpoint commits current work (agent/test checkpoints are commits,
 // never rewrites of shared history).
 func (m *Manager) Checkpoint(ctx context.Context, id, message string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	w, ok := m.ws[id]
 	if !ok {
 		return "", fmt.Errorf("unknown workspace %s", id)
@@ -125,6 +151,8 @@ func (m *Manager) Checkpoint(ctx context.Context, id, message string) (string, e
 // Destroy removes the worktree. Failed workspaces must be explicitly
 // destroyed so nothing with debug value disappears silently.
 func (m *Manager) Destroy(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	w, ok := m.ws[id]
 	if !ok {
 		return fmt.Errorf("unknown workspace %s", id)
@@ -139,13 +167,29 @@ func (m *Manager) Destroy(ctx context.Context, id string) error {
 
 // Attach re-tracks a surviving worktree (e.g. after a restart) without
 // touching the repository.
-func (m *Manager) Attach(w *Workspace) { m.ws[w.ID] = w }
+func (m *Manager) Attach(w *Workspace) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	copy := *w
+	m.ws[w.ID] = &copy
+}
 
 // Get returns a tracked workspace.
-func (m *Manager) Get(id string) (*Workspace, bool) { w, ok := m.ws[id]; return w, ok }
+func (m *Manager) Get(id string) (*Workspace, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.ws[id]
+	if !ok {
+		return nil, false
+	}
+	copy := *w
+	return &copy, true
+}
 
 // Active lists non-terminal workspaces for a project.
 func (m *Manager) Active(projectID string) []*Workspace {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []*Workspace
 	for _, w := range m.ws {
 		if w.ProjectID != projectID {
@@ -153,7 +197,8 @@ func (m *Manager) Active(projectID string) []*Workspace {
 		}
 		switch w.Status {
 		case Creating, Ready, Running, Waiting, Conflicted:
-			out = append(out, w)
+			copy := *w
+			out = append(out, &copy)
 		}
 	}
 	return out

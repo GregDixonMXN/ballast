@@ -1,13 +1,18 @@
-FROM golang:1.23-alpine AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
-COPY go.mod go.sum* ./
+COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
+COPY cmd ./cmd
+COPY internal ./internal
+COPY migrations ./migrations
+RUN CGO_ENABLED=0 go build -trimpath -o /out/ballast-server ./cmd/server
 
-FROM alpine:3.20
-RUN apk add --no-cache git ca-certificates
-WORKDIR /app
-COPY --from=build /out/server /app/server
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /data && chown 65534:65534 /data
+WORKDIR /data
+COPY --from=build /out/ballast-server /usr/local/bin/ballast-server
+USER 65534:65534
 EXPOSE 8080
-ENTRYPOINT ["/app/server"]
+ENTRYPOINT ["ballast-server"]
+CMD ["--addr", "0.0.0.0:8080", "--data", "/data/state.json", "--token-file", "/data/operator.token", "--worktrees", "/data/worktrees"]

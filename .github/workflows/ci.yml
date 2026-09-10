@@ -1,45 +1,30 @@
-name: ci
+name: CI
 on:
   push:
   pull_request:
+permissions:
+  contents: read
 jobs:
-  go:
+  verify:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: ballast
-          POSTGRES_PASSWORD: ballast
-          POSTGRES_DB: ballast
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ballast"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgres://ballast:ballast@localhost:5432/ballast?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version-file: go.mod
           cache: true
-      - run: gofmt -l .
-      - run: go vet ./...
-      - run: go test -count=1 ./...
-      - run: go build ./...
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '24'
           cache: npm
-          cache-dependency-path: apps/web/package.json
-      - run: npm ci --prefix apps/web
-      - run: npm run lint --prefix apps/web
-      - run: npm run build --prefix apps/web
+          cache-dependency-path: apps/web/package-lock.json
+      - run: ./scripts/check.sh
+      - run: ./scripts/check-postgres.sh
+      - run: ./scripts/build.sh
+      - run: python3 tests/release_smoke.py --bin-dir bin
+      - run: ./scripts/package.sh --skip-build
+      - run: ./scripts/check-container.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ballast-local-candidate
+          path: dist/

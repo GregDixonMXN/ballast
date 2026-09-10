@@ -61,14 +61,18 @@ type WorkResult struct {
 
 // Dispatch tracks runners and their pending queues.
 type Dispatch struct {
-	mu      sync.Mutex
-	runners map[string]*RunnerInfo
-	queues  map[string][]WorkItem
+	mu        sync.Mutex
+	runners   map[string]*RunnerInfo
+	queues    map[string][]WorkItem
+	owners    map[string]string
+	items     map[string]WorkItem
+	results   map[string]map[string]any
+	operation sync.Mutex
 }
 
 // NewDispatch builds empty registries.
 func NewDispatch() *Dispatch {
-	return &Dispatch{runners: map[string]*RunnerInfo{}, queues: map[string][]WorkItem{}}
+	return &Dispatch{runners: map[string]*RunnerInfo{}, queues: map[string][]WorkItem{}, owners: map[string]string{}, items: map[string]WorkItem{}, results: map[string]map[string]any{}}
 }
 
 // Register adds a runner and returns its record.
@@ -77,8 +81,10 @@ func (d *Dispatch) Register(r *RunnerInfo) *RunnerInfo {
 	defer d.mu.Unlock()
 	r.Online = true
 	r.LastSeen = time.Now().UTC()
-	d.runners[r.ID] = r
-	return r
+	copy := *r
+	d.runners[r.ID] = &copy
+	out := *r
+	return &out
 }
 
 // Heartbeat marks liveness; unknown runners are rejected.
@@ -91,7 +97,8 @@ func (d *Dispatch) Heartbeat(id string) (*RunnerInfo, bool) {
 	}
 	r.Online = true
 	r.LastSeen = time.Now().UTC()
-	return r, true
+	copy := *r
+	return &copy, true
 }
 
 // Enqueue appends work for a known runner.
@@ -102,6 +109,8 @@ func (d *Dispatch) Enqueue(runnerID string, item WorkItem) bool {
 		return false
 	}
 	d.queues[runnerID] = append(d.queues[runnerID], item)
+	d.owners[item.WorkspaceID] = runnerID
+	d.items[item.WorkspaceID] = item
 	return true
 }
 
@@ -150,6 +159,8 @@ func (s *Server) pollWork(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
+	s.dispatch.operation.Lock()
+	defer s.dispatch.operation.Unlock()
 	var in struct {
 		RunnerID    string `json:"runner_id"`
 		Adapter     string `json:"adapter"`
@@ -164,6 +175,10 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 501, map[string]string{"error": "services not wired"})
 		return
 	}
+	if !s.dispatch.Available(in.RunnerID) {
+		writeJSON(w, 404, map[string]string{"error": "unknown runner"})
+		return
+	}
 	rawTask, err := s.Tasks.Get(r.PathValue("id"))
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": err.Error()})
@@ -174,12 +189,11 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": "task type mismatch"})
 		return
 	}
-	if t.Status == task.Todo {
-		if _, err := s.Tasks.Transition(t.ID, string(task.Running)); err != nil {
-			writeJSON(w, 500, map[string]string{"error": err.Error()})
-			return
-		}
+	if t.Status != task.Todo {
+		writeJSON(w, 409, map[string]string{"error": "only TODO tasks can be assigned"})
+		return
 	}
+
 	rawWS, err := s.Workspaces.Create(t.ProjectID, t.ID, "")
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -188,6 +202,10 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 	ws, ok := rawWS.(*workspace.Workspace)
 	if !ok {
 		writeJSON(w, 500, map[string]string{"error": "workspace type mismatch"})
+		return
+	}
+	if _, err := s.Tasks.Transition(t.ID, string(task.Running)); err != nil {
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
 		return
 	}
 	prompt := in.Prompt
@@ -208,6 +226,8 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) reportResults(w http.ResponseWriter, r *http.Request) {
+	s.dispatch.operation.Lock()
+	defer s.dispatch.operation.Unlock()
 	var in WorkResult
 	if err := decodeJSON(r, &in); err != nil || in.WorkspaceID == "" {
 		writeJSON(w, 400, map[string]string{"error": "workspace_id required"})
@@ -219,6 +239,19 @@ func (s *Server) reportResults(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := s.dispatch.Heartbeat(r.PathValue("id")); !ok {
 		writeJSON(w, 404, map[string]string{"error": "unknown runner"})
+		return
+	}
+	if !s.dispatch.Owns(r.PathValue("id"), in.WorkspaceID) {
+		writeJSON(w, 403, map[string]string{"error": "workspace not assigned to runner"})
+		return
+	}
+	if cached, ok := s.dispatch.results[in.WorkspaceID]; ok {
+		writeJSON(w, 200, cached)
+		return
+	}
+	expected := s.dispatch.items[in.WorkspaceID]
+	if expected.TestCommand != "" && !in.TestRan && in.ExitCode == 0 {
+		writeJSON(w, 409, map[string]string{"error": "required test result missing"})
 		return
 	}
 	rawWS, err := s.Workspaces.Get(in.WorkspaceID)
@@ -239,7 +272,7 @@ func (s *Server) reportResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := workspace.Completed
-	if in.ExitCode != 0 {
+	if in.ExitCode != 0 || (in.TestRan && in.TestExit != 0) {
 		status = workspace.Failed
 	}
 	updated, err := s.Workspaces.SetStatus(ws.ID, string(status))
@@ -259,7 +292,7 @@ func (s *Server) reportResults(w http.ResponseWriter, r *http.Request) {
 		s.count.Inc("tests_run")
 	}
 	resp := map[string]any{"workspace": updated}
-	if in.ExitCode == 0 {
+	if in.ExitCode == 0 && (!in.TestRan || in.TestExit == 0) {
 		rawCS, err := s.Changesets.Build(ws.ProjectID, ws.TaskID, "", ws.ID)
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -280,6 +313,7 @@ func (s *Server) reportResults(w http.ResponseWriter, r *http.Request) {
 	} else {
 		_, _ = s.Tasks.Transition(ws.TaskID, string(task.Blocked))
 	}
+	s.dispatch.results[in.WorkspaceID] = resp
 	writeJSON(w, 200, resp)
 }
 
@@ -287,8 +321,8 @@ func (s *Server) setWorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Status string `json:"status"`
 	}
-	if err := decodeJSON(r, &in); err != nil || in.Status == "" {
-		writeJSON(w, 400, map[string]string{"error": "status required"})
+	if err := decodeJSON(r, &in); err != nil || in.Status != "RUNNING" {
+		writeJSON(w, 400, map[string]string{"error": "only RUNNING progress may be reported; use results for completion"})
 		return
 	}
 	if s.Workspaces == nil {
@@ -301,4 +335,28 @@ func (s *Server) setWorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, updated)
+}
+
+func (d *Dispatch) Owns(runnerID, workspaceID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.owners[workspaceID] == runnerID
+}
+
+func (d *Dispatch) List() []RunnerInfo {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := []RunnerInfo{}
+	for _, r := range d.runners {
+		v := *r
+		v.Online = time.Since(v.LastSeen) < 45*time.Second
+		out = append(out, v)
+	}
+	return out
+}
+func (d *Dispatch) Available(id string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r, ok := d.runners[id]
+	return ok && time.Since(r.LastSeen) < 45*time.Second
 }

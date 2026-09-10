@@ -334,7 +334,7 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
 func (s *PGEventStore) List(ctx context.Context, projectID string, limit int) ([]events.Event, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, project_id, actor_type, actor_id, type, entity_id, at, metadata
-FROM events WHERE ($1='' OR project_id=$1::uuid) ORDER BY at DESC LIMIT $2`,
+FROM events WHERE ($1='' OR project_id=NULLIF($1,'')::uuid) ORDER BY at DESC LIMIT $2`,
 		projectID, limit)
 	if err != nil {
 		return nil, err
@@ -358,6 +358,23 @@ FROM events WHERE ($1='' OR project_id=$1::uuid) ORDER BY at DESC LIMIT $2`,
 			_ = json.Unmarshal(meta, &e.Metadata)
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (p *PGRepo) ListProjects(ctx context.Context) ([]project.Project, error) {
+	rows, err := p.db.QueryContext(ctx, `SELECT id, org_id, name, repo_path, branch, canonical_sha, created_at FROM projects ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []project.Project{}
+	for rows.Next() {
+		var pr project.Project
+		if err := rows.Scan(&pr.ID, &pr.OrgID, &pr.Name, &pr.RepoPath, &pr.Branch, &pr.CanonicalSHA, &pr.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pr)
 	}
 	return out, rows.Err()
 }

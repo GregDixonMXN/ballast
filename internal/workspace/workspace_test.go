@@ -87,6 +87,7 @@ func TestDestroyCleansWorktree(t *testing.T) {
 	if _, err := os.Stat(w.Path); !os.IsNotExist(err) {
 		t.Fatal("worktree path still exists")
 	}
+	w, _ = m.Get(w.ID)
 	if w.Status != Destroyed {
 		t.Fatalf("status = %q", w.Status)
 	}
@@ -96,8 +97,8 @@ func TestFailedPreservedUntilDestroy(t *testing.T) {
 	m := NewManager(t.TempDir())
 	w := &Workspace{ID: "x", Status: Failed}
 	m.ws["x"] = w
-	if _, err := m.SetStatus("x", Completed); err != nil {
-		t.Fatal(err)
+	if _, err := m.SetStatus("x", Completed); err == nil {
+		t.Fatal("failed workspace must not be relabeled completed")
 	}
 	// Failed is not auto-destroyed: still tracked.
 	if _, ok := m.Get("x"); !ok {
@@ -109,5 +110,16 @@ func TestPathsAbsolute(t *testing.T) {
 	m := NewManager("relative-root")
 	if !filepath.IsAbs(m.Root) {
 		t.Fatalf("root = %q, want absolute", m.Root)
+	}
+}
+
+func TestTerminalStatusCannotResume(t *testing.T) {
+	m := NewManager(t.TempDir())
+	m.Attach(&Workspace{ID: "terminal", Status: Completed})
+	if _, err := m.SetStatus("terminal", Running); err == nil {
+		t.Fatal("completed workspace resumed")
+	}
+	if _, err := m.SetStatus("terminal", Status("UNKNOWN")); err == nil {
+		t.Fatal("invalid status accepted")
 	}
 }

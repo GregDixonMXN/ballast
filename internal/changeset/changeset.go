@@ -41,7 +41,7 @@ type Changeset struct {
 
 // Build snapshots a worktree into a changeset (IN_REVIEW).
 func Build(ctx context.Context, projectID, taskID, agentID, workPath, base string) (*Changeset, error) {
-	files, err := git.StatusPorcelain(ctx, workPath)
+	files, err := git.ChangedBase(ctx, workPath, base)
 	if err != nil {
 		return nil, err
 	}

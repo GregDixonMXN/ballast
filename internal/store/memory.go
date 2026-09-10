@@ -149,3 +149,14 @@ func (m *MemoryRepo) ListChangesets(_ context.Context, projectID string) ([]chan
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
 }
+
+func (m *MemoryRepo) ListProjects(_ context.Context) ([]project.Project, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []project.Project{}
+	for _, p := range m.pr {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}

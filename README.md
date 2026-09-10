@@ -1,45 +1,81 @@
-# Ballast — DevOps OS for human + AI software teams (MVP)
+# Ballast
 
-Smallest excellent MVP proving: **multiple humans and AI agents can safely
-work on the same repository concurrently without unknowingly conflicting
-with or destroying one another's work.**
+**A local control room for parallel software work.**
 
-## What this is
+Plan tasks, give each worker its own Git worktree, inspect the result, and
+integrate reviewed changes into a canonical branch. Ballast keeps the task,
+workspace, changeset, and runner visible in one operational dashboard.
 
-Modular Go monolith (control plane + runner + CLI), Next.js web client,
-PostgreSQL as source of truth, Git worktrees for isolation, events for
-everything, conflict detection before integration.
+This is the **1.0.0-rc.1 local release candidate**, not a hosted service.
 
-## Quickstart
+## The workflow
 
-Prerequisites: Go 1.23+, Node 18+, Git, Postgres (or Docker).
+1. Register a local Git repository and choose its canonical branch.
+2. Create a task with a clear outcome.
+3. Create an isolated workspace for manual work, or assign a connected runner.
+4. Review the exact changed files and patch in a changeset.
+5. Approve or reject; integration is a separate, explicit action.
+6. Resolve stale bases and conflicts before retrying integration.
+
+The dashboard includes project overview, task planning, runner availability,
+workspace inspection, and changeset review. The API and CLI expose the same
+local control plane. No cloud account is required for manual work.
+
+## Start locally
+
+Build prerequisites: **Go 1.27.1 or newer**, **Node.js 24**, npm, Git, Bash,
+curl, and Python 3 on Linux. The release archive includes the built Go binaries and
+standalone dashboard; it needs Node.js, Git, Bash, and curl but no compiler.
 
 ```bash
-./scripts/dev.sh        # postgres + migrate + api + runner + web
-./scripts/demo.sh       # demo repo, two tasks, two worktrees, conflict check
-go test ./...           # unit + integration (temp git repos, no DB needed for git/conflict/changeset)
+./scripts/build.sh
+./scripts/start.sh
 ```
 
-## Layout
+Open **http://127.0.0.1:3000**. The launcher prints the *path* to your private
+operator credential, never its value. Open that local file yourself and use
+the dashboard's connection form. Do not commit it or paste it into an issue.
 
-- `cmd/server` — control-plane API (REST + SSE events)
-- `cmd/runner` — execution-node daemon (worktrees, agents, tests)
-- `cmd/ballast` — CLI client of the API
-- `internal/` — domain packages (project, task, workspace, agent, git,
-  changeset, integration, conflict, events, auth, telemetry, store, api, lease)
-- `apps/web` — Next.js operational UI (thin client of the API)
-- `migrations/` — Postgres schema, `store` applies them on boot
-- `docs/` — architecture, domain model, events, runner, security,
-  development, roadmap, progress
+The launcher binds both services to loopback and keeps local state under
+`.ballast/`. It starts the API and dashboard; it does not start a worker or
+execute a task automatically. Ctrl+C stops the services.
 
-## MVP workflow
+See [Installation](docs/INSTALL.md) for archive installation, runner setup,
+ports, storage, and backup. [Security](SECURITY.md) explains the trust model.
 
-project → repository → task ×2 → isolated worktrees → agents run →
-changed files tracked → overlap warning → changeset (base, files, diff,
-tests) → approve/reject → controlled integrate → revalidate next
-changeset (NEEDS_REBASE/CONFLICTED, never silent force-merge).
+## What isolation means
 
-## Docs
+Worktrees separate working directories, **not operating-system authority**.
+Run only trusted commands and agents. A local process can access files and
+Git administration allowed by its OS account; Ballast is not a sandbox.
+The supported release topology is one control plane and same-host runners
+sharing repository paths. It is not multi-tenant SaaS or a distributed runner
+scheduler.
 
-Start at `docs/architecture.md`, then `docs/development.md`.
-Progress log: `docs/progress.md`.
+## Development and release
+
+```bash
+./scripts/check.sh        # Go formatting, vet, race tests, web type/build
+./scripts/demo.sh         # synthetic Git workflow; no existing repo is modified
+./scripts/package.sh     # binaries + standalone web + docs + checksums
+```
+
+- [Verification](docs/VERIFICATION.md): exact checks and known limitations.
+- [Development](docs/development.md): toolchain and test fixtures.
+- [Release guide](docs/RELEASE.md): reproduce and validate a package.
+- [Changelog](CHANGELOG.md): release-candidate changes.
+- [Contributing](CONTRIBUTING.md): contribution and review expectations.
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `cmd/server`, `cmd/runner`, `cmd/ballast` | API, worker daemon, CLI |
+| `internal/` | Auth, state, workspaces, changesets, integration |
+| `apps/web/` | Responsive Next.js dashboard and fixed-origin API proxy |
+| `scripts/` | Build, local launch, checks, packaging |
+| `docs/` | Installation, operations, verification, architecture |
+
+No distribution license has been selected in this repository. Its owner must
+choose licensing terms before redistributing a public release. No license or
+commercial support entitlement is implied by the release-candidate label.

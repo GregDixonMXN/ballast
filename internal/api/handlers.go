@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"ballast/internal/changeset"
 	"ballast/internal/events"
 )
 
@@ -214,6 +215,8 @@ func (s *Server) decideChangeset(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 501, map[string]string{"error": "changeset service not wired"})
 		return
 	}
+	ident, _ := s.auth.Parse(r.Header.Get("Authorization"))
+	in.Actor = ident.ID
 	cs, err := s.Changesets.Decide(r.PathValue("id"), in.Decision, in.Actor)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -225,4 +228,75 @@ func (s *Server) decideChangeset(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.bus.Publish(r.Context(), events.New("", events.ActorHuman, in.Actor, typ, r.PathValue("id"), nil))
 	writeJSON(w, 200, cs)
+}
+
+func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
+	if s.Projects == nil {
+		writeJSON(w, 503, map[string]string{"error": "projects unavailable"})
+		return
+	}
+	out, err := s.Projects.List()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
+	if s.Tasks == nil {
+		writeJSON(w, 503, map[string]string{"error": "tasks unavailable"})
+		return
+	}
+	out, err := s.Tasks.Get(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+func (s *Server) listChangesets(w http.ResponseWriter, r *http.Request) {
+	if s.Changesets == nil {
+		writeJSON(w, 503, map[string]string{"error": "changesets unavailable"})
+		return
+	}
+	out, err := s.Changesets.List(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if out == nil {
+		out = []changeset.Changeset{}
+	}
+	writeJSON(w, 200, out)
+}
+func (s *Server) listRunners(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.dispatch.List())
+}
+func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
+	if s.EventStore == nil {
+		writeJSON(w, 200, []events.Event{})
+		return
+	}
+	out, err := s.EventStore.List(r.Context(), r.URL.Query().Get("project"), 200)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if out == nil {
+		out = []events.Event{}
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) getWorkspace(w http.ResponseWriter, r *http.Request) {
+	if s.Workspaces == nil {
+		writeJSON(w, 503, map[string]string{"error": "workspaces unavailable"})
+		return
+	}
+	out, err := s.Workspaces.Get(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
 }

@@ -169,3 +169,50 @@ func TestAssignUnknownRunner(t *testing.T) {
 		t.Fatalf("assign unknown runner = %d, want 404", code)
 	}
 }
+
+func TestRunnerCapabilitiesRequiredTestsAndDuplicateReport(t *testing.T) {
+	repo := gitSeed(t)
+	ts, operator, ids := testServer(t, repo)
+	status, reg := call(t, ts, operator, "POST", "/runners", map[string]any{"hostname": "fixture"})
+	if status != 201 {
+		t.Fatal(status, reg)
+	}
+	runner := reg["runner"].(map[string]any)["id"].(string)
+	token := reg["token"].(string)
+	for _, route := range []string{"/projects", "/events", "/runners/not-owned/work"} {
+		status, _ = call(t, ts, token, "GET", route, nil)
+		if status != 403 {
+			t.Fatalf("%s: %d", route, status)
+		}
+	}
+	status, _ = call(t, ts, token, "POST", "/projects", map[string]string{"name": "forbidden"})
+	if status != 403 {
+		t.Fatal(status)
+	}
+	_, created := call(t, ts, operator, "POST", "/projects/"+ids["project"]+"/tasks", map[string]string{"title": "required test"})
+	taskID := created["id"].(string)
+	status, assigned := call(t, ts, operator, "POST", "/tasks/"+taskID+"/assign", map[string]string{"runner_id": runner, "test_command": "true"})
+	if status != 201 {
+		t.Fatal(status, assigned)
+	}
+	ws := assigned["workspace"].(map[string]any)
+	wsID := ws["id"].(string)
+	if err := os.WriteFile(filepath.Join(ws["path"].(string), "result.txt"), []byte("result\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report := map[string]any{"workspace_id": wsID, "exit_code": 0}
+	status, _ = call(t, ts, token, "POST", "/runners/"+runner+"/results", report)
+	if status != 409 {
+		t.Fatalf("missing tests: %d", status)
+	}
+	report["test_ran"] = true
+	report["test_exit"] = 0
+	status, first := call(t, ts, token, "POST", "/runners/"+runner+"/results", report)
+	if status != 200 {
+		t.Fatal(status, first)
+	}
+	status, second := call(t, ts, token, "POST", "/runners/"+runner+"/results", report)
+	if status != 200 || first["changeset_id"] != second["changeset_id"] {
+		t.Fatal(status, first, second)
+	}
+}

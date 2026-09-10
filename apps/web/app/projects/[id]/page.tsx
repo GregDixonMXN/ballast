@@ -1,57 +1,42 @@
 "use client";
-import { useState } from "react";
-import { api, useEvents } from "../../lib/api";
+import Link from "next/link";
+import { use, useState, FormEvent } from "react";
+import { api, Project, Task, Workspace, Changeset, Runner, ActivityEvent, short, when } from "../../../lib/api";
+import { useData } from "../../../components/data";
+import { useSession } from "../../../components/session";
+import { Icon } from "../../../components/icons";
+import { Badge, Dialog, Diff, Empty, Notice } from "../../../components/ui";
 
-// Operational project screen: header, tasks, workspaces, conflicts,
-// activity feed. Intentionally plain — function before polish.
-export default function ProjectPage({ params }: { params: { id: string } }) {
-  const id = params.id;
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [workspaces, setWorkspaces] = useState<any[]>([]);
-  const [feed, setFeed] = useState<any[]>([]);
-  const [title, setTitle] = useState("");
-
-  useEvents(id, (e) => setFeed((f) => [e, ...f].slice(0, 100)));
-
-  async function refresh() {
-    setTasks(await api(`/projects/${id}/tasks`));
-    setWorkspaces(await api(`/projects/${id}/workspaces`));
-  }
-  async function createTask() {
-    if (!title.trim()) return;
-    await api(`/projects/${id}/tasks`, {
-      method: "POST",
-      body: JSON.stringify({ title }),
-    });
-    setTitle("");
-    refresh();
-  }
-
-  return (
-    <main style={{ padding: 16, fontFamily: "system-ui" }}>
-      <h1>Project {id}</h1>
-      <button onClick={refresh}>Refresh</button>
-      <section>
-        <h2>New task</h2>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Modify the backend API" />
-        <button onClick={createTask}>Create</button>
-      </section>
-      <section>
-        <h2>Tasks</h2>
-        <ul>{tasks.map((t: any) => <li key={t.id}>{t.title} — {t.status}</li>)}</ul>
-      </section>
-      <section>
-        <h2>Workspaces</h2>
-        <ul>
-          {workspaces.map((w: any) => (
-            <li key={w.id}>{w.task_id} @ {String(w.base_commit).slice(0, 8)} — {w.status}</li>
-          ))}
-        </ul>
-      </section>
-      <section>
-        <h2>Activity</h2>
-        <ul>{feed.map((e: any, i) => <li key={i}>{e.type} — {e.entity_id}</li>)}</ul>
-      </section>
-    </main>
-  );
+export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params); const { token } = useSession();
+  const { data: [project, rawTasks, rawWorkspaces, rawChangesets, rawRunners, rawActivity], error, loading, refresh, updated } = useData<[Project | null, Task[] | null, Workspace[] | null, Changeset[] | null, Runner[] | null, ActivityEvent[] | null]>([`/projects/${id}`, `/projects/${id}/tasks`, `/projects/${id}/workspaces`, `/projects/${id}/changesets`, `/runners`, `/activity?project=${id}`], [null, [], [], [], [], []]);
+  const tasks = rawTasks ?? []; const workspaces = rawWorkspaces ?? []; const changesets = rawChangesets ?? []; const runners = (rawRunners ?? []).filter(r => r.online);
+  const [tab, setTab] = useState("tasks"); const [create, setCreate] = useState(false); const [assign, setAssign] = useState<Task | null>(null); const [runnerID, setRunnerID] = useState("");
+  const [busy, setBusy] = useState(false); const [formError, setFormError] = useState(""); const [notice, setNotice] = useState(""); const [query, setQuery] = useState(""); const [status, setStatus] = useState("ALL");
+  const [preview, setPreview] = useState<{ workspace: Workspace; diff: string; loading: boolean; error: string } | null>(null);
+  async function perform(action: () => Promise<unknown>, done: string) { setBusy(true); setFormError(""); try { await action(); setNotice(done); setCreate(false); setAssign(null); refresh(); } catch (e) { setFormError(e instanceof Error ? e.message : "The action failed."); } finally { setBusy(false); } }
+  function createTask(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); void perform(() => api(token, `/projects/${id}/tasks`, { method: "POST", body: JSON.stringify({ title: String(form.get("title")).trim(), description: String(form.get("description")).trim(), scopes: String(form.get("scopes")).split("\n").map(s => s.trim()).filter(Boolean) }) }), "Task created. Assign it to an available runner when you're ready."); }
+  function assignTask(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!assign) return; const form = new FormData(event.currentTarget); void perform(() => api(token, `/tasks/${assign.id}/assign`, { method: "POST", body: JSON.stringify({ runner_id: form.get("runner"), adapter: form.get("adapter"), prompt: String(form.get("prompt")).trim(), test_command: String(form.get("test_command")).trim() }) }), "Task assigned. Its isolated workspace is being prepared."); }
+  async function showDiff(workspace: Workspace) { setPreview({ workspace, diff: "", loading: true, error: "" }); try { const result = await api<{ diff: string }>(token, `/workspaces/${workspace.id}/diff`); setPreview(current => current?.workspace.id === workspace.id ? { workspace, diff: result.diff, loading: false, error: "" } : current); } catch (e) { setPreview(current => current?.workspace.id === workspace.id ? { workspace, diff: "", loading: false, error: e instanceof Error ? e.message : "Diff unavailable." } : current); } }
+  const review = changesets.filter(cs => ["IN_REVIEW", "APPROVED"].includes(cs.status)); const running = tasks.filter(t => t.status === "RUNNING");
+  const taskName = (taskID: string) => tasks.find(t => t.id === taskID)?.title ?? `Task ${short(taskID)}`;
+  const filtered = tasks.filter(t => (status === "ALL" || t.status === status) && `${t.title} ${t.description}`.toLowerCase().includes(query.toLowerCase()));
+  const selectedRunner = runners.find(r => r.id === runnerID);
+  const activity = (rawActivity ?? []).map(e => ({ key: e.id, title: typeof e.metadata?.title === "string" ? e.metadata.title : e.entity_id ? taskName(e.entity_id) : e.actor_id || "Local control plane", label: e.type.replaceAll(".", " ").replaceAll("_", " "), time: e.at, icon: e.type.startsWith("workspace") ? "branch" : e.type.startsWith("test") ? "shield" : "clock" })).sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 100);
+  if (loading) return <main id="main" className="page"><div className="skeleton" role="status">Loading project workspace…</div></main>;
+  if (!project) return <main id="main" className="page"><Link href="/" className="text-link">← All projects</Link><h1>Project unavailable</h1><Notice danger>{error || "This project could not be found."} <button className="text-button" onClick={refresh}>Retry</button></Notice></main>;
+  return <main id="main" className="page"><Link href="/" className="back-link">← All projects</Link><div className="page-heading"><div><span className="eyebrow">PROJECT WORKSPACE</span><h1>{project.name}</h1><p className="repo-line"><span><Icon name="branch"/>{project.branch}</span><code>{short(project.canonical_sha)}</code><span className="repo-path">{project.repo_path}</span></p></div><button className="button primary" onClick={() => { setCreate(true); setFormError(""); }}><Icon name="plus"/>New task</button></div>
+    {error && <Notice danger>{error} Showing the last successful snapshot. <button className="text-button" onClick={refresh}>Retry</button></Notice>}{notice && <Notice>{notice}</Notice>}{formError && !create && !assign && <Notice danger>{formError}</Notice>}
+    <div className="project-stats"><div><span>Total tasks</span><strong>{tasks.length}</strong></div><div><span><span className="connection-dot connected"/>In progress</span><strong>{running.length}</strong></div><div><span>Ready for review</span><strong>{review.length}</strong></div><div><span>Integrated changesets</span><strong>{changesets.filter(cs => cs.status === "MERGED").length}</strong></div></div>
+    <div className="tabs" role="tablist" aria-label="Project sections">{[["tasks", "Tasks", tasks.length], ["workspaces", "Workspaces", workspaces.length], ["reviews", "Reviews", review.length], ["activity", "Activity", null]].map(([key, label, count]) => <button key={key} role="tab" id={`tab-${key}`} aria-selected={tab === key} aria-controls={`panel-${key}`} onClick={() => setTab(String(key))}>{label}{count !== null && <span className="count">{count}</span>}</button>)}<button className="icon-button refresh-tab" onClick={refresh} aria-label="Refresh project"><Icon name="refresh"/></button></div>
+    <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+    {tab === "tasks" && <><div className="table-toolbar"><div className="search"><Icon name="search"/><input aria-label="Search tasks" placeholder="Search tasks…" value={query} onChange={e => setQuery(e.target.value)}/></div><select aria-label="Filter task status" value={status} onChange={e => setStatus(e.target.value)}>{["ALL", "TODO", "RUNNING", "REVIEW", "BLOCKED", "DONE"].map(s => <option key={s} value={s}>{s === "ALL" ? "All statuses" : s.charAt(0) + s.slice(1).toLowerCase()}</option>)}</select></div>{filtered.length ? <div className="task-list">{filtered.map(t => <article className="task-card" key={t.id}><div className="task-main"><div className="task-top"><span className="task-id">{short(t.id)}</span><Badge status={t.status}/></div><h3>{t.title}</h3>{t.description && <p className="task-description">{t.description}</p>}<div className="task-meta"><span><Icon name="clock"/>{when(t.updated_at)}</span>{t.scopes?.length ? <span>{t.scopes.length} scope{t.scopes.length !== 1 ? "s" : ""}</span> : null}</div></div><div className="task-actions">{t.status === "TODO" && <button className="button secondary small" onClick={() => { setAssign(t); setRunnerID(runners[0]?.id ?? ""); setFormError(""); }}>Assign runner<Icon name="arrow"/></button>}{t.status === "TODO" && <button className="text-button" disabled={busy} onClick={() => void perform(() => api(token, `/projects/${id}/workspaces`, { method: "POST", body: JSON.stringify({ task_id: t.id }) }), "Manual workspace created. Open Workspaces to find its local path and submit your changes for review.")}>Work manually</button>}{t.status === "REVIEW" && <button className="button secondary small" onClick={() => setTab("reviews")}>Review changes<Icon name="arrow"/></button>}{t.status === "BLOCKED" && <button className="button secondary small" disabled={busy} onClick={() => void perform(() => api(token, `/tasks/${t.id}/transition`, { method: "POST", body: JSON.stringify({ to: "TODO" }) }), "Task returned to the queue. Its previous workspace is preserved.")}>Return to queue</button>}{t.status === "RUNNING" && <span className="running-note"><span className="connection-dot connected"/>Work in progress</span>}</div></article>)}</div> : <div className="panel"><Empty title={tasks.length ? "No matching tasks" : "Make room for the next idea"} icon="grid">{tasks.length ? "Try changing your search or status filter." : "Create a focused task, describe the outcome, then assign a runner. Ballast keeps each task's changes in its own Git worktree."}</Empty></div>}</>}
+    {tab === "workspaces" && (workspaces.length ? <div className="workspace-grid">{workspaces.map(w => <article className="panel workspace-card" key={w.id}><div className="section-header"><Icon name="branch"/><Badge status={w.status}/></div><h3>{taskName(w.task_id)}</h3><p className="mono">{w.path}</p><dl><div><dt>Workspace</dt><dd>{short(w.id)}</dd></div><div><dt>Base commit</dt><dd>{short(w.base_commit)}</dd></div></dl><button className="button secondary full" onClick={() => void showDiff(w)}><Icon name="code"/>Inspect file diff</button>{["READY", "COMPLETED", "FAILED", "WAITING", "CONFLICTED"].includes(w.status) && <button className="button primary full" disabled={busy} onClick={() => void perform(() => api(token, `/workspaces/${w.id}/changesets`, { method: "POST", body: JSON.stringify({ project_id: id, task_id: w.task_id }) }), "Snapshot submitted. Open Reviews to inspect and approve the changeset.")}>Submit for review<Icon name="arrow"/></button>}</article>)}</div> : <div className="panel"><Empty title="No workspaces yet" icon="branch">Assign a task to a runner. Ballast creates an isolated Git worktree automatically.</Empty></div>)}
+    {tab === "reviews" && (changesets.length ? <div className="task-list">{changesets.map(cs => <Link href={`/projects/${id}/changesets/${cs.id}`} key={cs.id} className="review-card"><div className="review-icon"><Icon name="code"/></div><div className="review-summary"><div className="task-top"><span className="task-id">{short(cs.id)}</span><Badge status={cs.status}/></div><h3>{taskName(cs.task_id)}</h3><p>{cs.files?.length ?? 0} file{cs.files?.length !== 1 ? "s" : ""} changed <span>·</span> Base {short(cs.base_commit)} <span>·</span> {when(cs.created_at)}</p></div><Icon name="arrow"/></Link>)}</div> : <div className="panel"><Empty title="Nothing waiting for review" icon="shield">When a runner finishes successfully, its changeset will appear here for you to inspect, approve, and integrate.</Empty></div>)}
+    {tab === "activity" && <div className="panel activity-panel"><div className="section-header"><h2>Recent activity</h2><span className="subtle">Latest 100 recorded events</span></div>{activity.length ? <ol className="activity-list">{activity.map(a => <li key={a.key}><span className="activity-icon"><Icon name={a.icon}/></span><div><strong>{a.label}</strong><p>{a.title}</p></div><time>{when(a.time)}</time></li>)}</ol> : <Empty title="A fresh start" icon="clock">Project activity appears as you create tasks and move work forward.</Empty>}</div>}
+    </section><p className="refresh-note"><span className={`connection-dot ${error ? "" : "connected"}`}/>{error ? "Connection needs attention" : "Refreshes every 5 seconds"}{updated && ` · Last checked ${updated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</p>
+    {create && <Dialog title="Create a task" onClose={() => !busy && setCreate(false)}><form onSubmit={createTask}><p className="form-intro">One clear outcome. One isolated workspace.</p><label htmlFor="task-title">Task title</label><input id="task-title" name="title" placeholder="Add CSV export to the reports page" maxLength={240} required autoFocus/><label htmlFor="task-description">Description</label><textarea id="task-description" name="description" rows={4} placeholder="What should change? Include acceptance criteria and relevant context."/><label htmlFor="task-scopes">File scopes <span className="optional">optional</span></label><textarea id="task-scopes" name="scopes" rows={2} placeholder={"src/reports/\ntests/reports/"}/><p className="field-help">One path per line. Scopes communicate intent; they are not a filesystem sandbox.</p>{formError && <Notice danger>{formError}</Notice>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={() => setCreate(false)} disabled={busy}>Cancel</button><button className="button primary" disabled={busy}>{busy ? "Creating…" : "Create task"}<Icon name="plus"/></button></div></form></Dialog>}
+    {assign && <Dialog title="Assign a runner" onClose={() => !busy && setAssign(null)}><form onSubmit={assignTask}><p className="form-intro"><strong>{assign.title}</strong><br/>The runner will execute in a new, isolated Git worktree.</p>{!runners.length ? <Notice danger>No runners are online. Start a runner using the setup guide, then try again.</Notice> : <><label htmlFor="runner">Runner</label><select id="runner" name="runner" value={runnerID} onChange={e => setRunnerID(e.target.value)} required>{runners.map(r => <option value={r.id} key={r.id}>{r.hostname} · {r.os}/{r.arch}</option>)}</select><label htmlFor="adapter">Adapter</label><select id="adapter" name="adapter" key={runnerID}><option value="">Runner default</option>{(selectedRunner?.adapters ?? []).map(a => <option key={a} value={a}>{a}</option>)}</select><label htmlFor="prompt">Instructions <span className="optional">optional override</span></label><textarea id="prompt" name="prompt" rows={3} placeholder="Leave blank to use the task title and description."/><label htmlFor="test-command">Verification command <span className="optional">optional</span></label><input id="test-command" name="test_command" placeholder="go test ./..."/><p className="field-help">Runs in the task workspace. Use a command you trust; it executes with the runner's local permissions.</p></>}{formError && <Notice danger>{formError}</Notice>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={() => setAssign(null)} disabled={busy}>Cancel</button><button className="button primary" disabled={busy || !runners.length}>{busy ? "Assigning…" : "Assign and run"}<Icon name="arrow"/></button></div></form></Dialog>}
+    {preview && <Dialog title={`Workspace diff · ${short(preview.workspace.id)}`} onClose={() => setPreview(null)}>{preview.loading ? <p role="status">Loading file changes…</p> : preview.error ? <Notice danger>{preview.error}</Notice> : <Diff value={preview.diff}/>}<div className="dialog-actions"><button className="button secondary" onClick={() => setPreview(null)}>Close</button></div></Dialog>}
+  </main>;
 }

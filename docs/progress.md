@@ -1,3 +1,9 @@
+# Historical development notes
+
+These pre-release notes are historical, not current release claims. See
+[Verification](VERIFICATION.md), [Installation](INSTALL.md), and [Security](../SECURITY.md)
+for the release-candidate contract.
+
 # Progress
 
 ## Completed

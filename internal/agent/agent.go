@@ -6,11 +6,12 @@
 package agent
 
 import (
-	"bytes"
+	"ballast/internal/executil"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -54,7 +55,8 @@ type ShellAdapter struct {
 	name    string
 	binary  string
 	baseArg []string
-	Env     []string // extra env, secrets injected here at spawn only
+	Env     []string // extra env, filtered before spawn
+	Home    string   // explicit operator-selected agent config home; empty creates a disposable home
 
 	mu    sync.Mutex
 	procs map[string]*exec.Cmd
@@ -83,8 +85,32 @@ func (s *ShellAdapter) StartTask(ctx context.Context, taskID, workspace, prompt 
 	args := append(append([]string{}, s.baseArg...), prompt)
 	cmd := exec.CommandContext(ctx, s.binary, args...)
 	cmd.Dir = workspace
-	cmd.Env = append(os.Environ(), s.Env...)
-	var so, se bytes.Buffer
+	executil.Configure(cmd)
+	cmd.Env = executil.Environment(s.Env)
+	home := s.Home
+	if home == "" {
+		var err error
+		home, err = os.MkdirTemp("", "ballast-agent-home-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(home)
+	} else {
+		var err error
+		home, err = filepath.Abs(home)
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(home)
+		if err != nil {
+			return nil, fmt.Errorf("agent home: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("agent home must be a directory")
+		}
+	}
+	cmd.Env = append(cmd.Env, "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"), "XDG_CACHE_HOME="+filepath.Join(home, ".cache"))
+	var so, se executil.Buffer
 	cmd.Stdout = &so
 	cmd.Stderr = &se
 	id := uuid.NewString()
@@ -131,7 +157,7 @@ func (s *ShellAdapter) Stop(_ context.Context, execID string) error {
 	if !ok {
 		return fmt.Errorf("no live execution %s", execID)
 	}
-	return cmd.Process.Kill()
+	return executil.Kill(cmd)
 }
 
 func (s *ShellAdapter) Status(_ context.Context, execID string) (Status, error) {

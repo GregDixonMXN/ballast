@@ -8,26 +8,33 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+
 	"strings"
 )
 
 // run executes git -C dir args... and returns trimmed stdout.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
-	full := append([]string{"-C", dir}, args...)
+	out, err := runRaw(ctx, dir, args...)
+	return strings.TrimSpace(out), err
+}
+
+func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
+	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "diff.external=", "-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
+		return out.String(), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
 	}
-	return strings.TrimSpace(out.String()), nil
+	return out.String(), nil
 }
 
 // Head returns the full SHA of ref (e.g. HEAD, main) in repo.
 func Head(ctx context.Context, repo string, ref string) (string, error) {
-	return run(ctx, repo, "rev-parse", ref)
+	return run(ctx, repo, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 }
 
 // Show returns the blob bytes of rev:path (e.g. "main:a.go") without
@@ -92,32 +99,34 @@ func StatusPorcelain(ctx context.Context, dir string) ([]string, error) {
 // newline when non-empty: git apply rejects patches whose final line
 // is unterminated as corrupt.
 func DiffBase(ctx context.Context, dir, base string) (string, error) {
-	out, err := run(ctx, dir, "diff", base, "--", ".")
+	// A private alternate index includes tracked, committed and untracked
+	// content without staging anything in the agent's real index.
+	f, err := os.CreateTemp("", "ballast-index-*")
 	if err != nil {
 		return "", err
 	}
-	un, err := run(ctx, dir, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
+	index := f.Name()
+	f.Close()
+	os.Remove(index)
+	defer os.Remove(index)
+	invoke := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
+		var out, errb bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &errb
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("snapshot: %w: %s", err, errb.String())
+		}
+		return out.String(), nil
+	}
+	if _, err = invoke("read-tree", base); err != nil {
 		return "", err
 	}
-	for _, f := range strings.Split(un, "\n") {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
-		}
-		d, err := run(ctx, dir, "diff", "--no-index", "--", "/dev/null", f)
-		if err != nil {
-			// --no-index exits 1 when diffs exist; output is still valid.
-			if out == "" && d == "" {
-				return out, nil
-			}
-		}
-		out += "\n" + d
+	if _, err = invoke("add", "-A", "--", "."); err != nil {
+		return "", err
 	}
-	if out != "" && !strings.HasSuffix(out, "\n") {
-		out += "\n"
-	}
-	return out, nil
+	return invoke("diff", "--cached", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", base, "--", ".")
 }
 
 // Hunks returns per-file changed line ranges vs base (for region overlap).
@@ -174,4 +183,26 @@ func TestMergeClean(ctx context.Context, repo, branch, head string) (bool, strin
 	}
 	// Fallback: not available on old git — report unknown cleanly.
 	return true, "merge-tree unavailable; caller must verify via worktree", nil
+}
+
+// ChangedBase includes changes committed by an agent as well as uncommitted
+// and untracked paths. NUL delimiters preserve whitespace in file names.
+func ChangedBase(ctx context.Context, dir, base string) ([]string, error) {
+	out, err := runRaw(ctx, dir, "diff", "--name-only", "-z", base, "--", ".")
+	if err != nil {
+		return nil, err
+	}
+	un, err := runRaw(ctx, dir, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	files := []string{}
+	seen := map[string]bool{}
+	for _, f := range strings.Split(out+un, "\x00") {
+		if f != "" && !seen[f] {
+			files = append(files, f)
+			seen[f] = true
+		}
+	}
+	return files, nil
 }

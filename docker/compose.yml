@@ -1,52 +1,22 @@
-version: "3.9"
-
+# Optional development database only. Local JSON storage needs no Docker.
+# The trust-authenticated database is intentionally loopback-only. Never use
+# this development configuration on a public/shared host.
+name: ballast-dev
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ballast
-      POSTGRES_PASSWORD: ballast
-      POSTGRES_DB: ballast
+      POSTGRES_USER: ballast_dev
+      POSTGRES_DB: ballast_dev
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ballast"]
+      test: ["CMD-SHELL", "pg_isready -U ballast_dev -d ballast_dev"]
       interval: 5s
       timeout: 3s
       retries: 10
-
-  api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.api
-    environment:
-      DATABASE_URL: postgres://ballast:ballast@postgres:5432/ballast?sslmode=disable
-      BALLAST_ADDR: ":8080"
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - repos:/repos
-      - worktrees:/worktrees
-
-  runner:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runner
-    environment:
-      BALLAST_SERVER: http://api:8080
-    depends_on:
-      - api
-    volumes:
-      - repos:/repos
-      - worktrees:/worktrees
-      - /var/run/docker.sock:/var/run/docker.sock
-
 volumes:
   pgdata:
-  repos:
-  worktrees:

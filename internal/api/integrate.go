@@ -72,6 +72,9 @@ func (s *Server) integrate(w http.ResponseWriter, r *http.Request) {
 	_ = s.bus.Publish(r.Context(), events.New(p.ID, events.ActorHuman, ident.ID,
 		events.MergeCompleted, cs.ID, map[string]any{"head": res.NewHead}))
 	s.count.Inc("integrations")
+	if s.Tasks != nil {
+		_, _ = s.Tasks.Transition(cs.TaskID, "DONE")
+	}
 	revalidated := s.revalidateSiblings(r, p, cs.ID, res.NewHead)
 	resp["revalidated"] = revalidated
 	writeJSON(w, 200, resp)

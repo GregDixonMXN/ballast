@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 
 	"ballast/internal/changeset"
 	"ballast/internal/git"
@@ -61,8 +63,29 @@ func Applies(ctx context.Context, repo, base, diff, workRoot string) bool {
 // Integrate merges cs into branch of repo. It mutates cs.Status to one
 // of MERGED, NEEDS_REBASE, or CONFLICTED; the caller persists cs and,
 // on success, records NewHead as the project's canonical head.
+var integrationMu sync.Mutex
+
 func Integrate(ctx context.Context, repo, branch string, cs *changeset.Changeset, workRoot string) (*Result, error) {
-	head, err := git.Head(ctx, repo, branch)
+	integrationMu.Lock()
+	defer integrationMu.Unlock()
+	if err := git.ValidateBranch(ctx, repo, branch); err != nil {
+		return nil, err
+	}
+	common, err := git.CommonDir(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(filepath.Join(common, "ballast-integration.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return nil, fmt.Errorf("integration already active: %w", err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+
+	head, err := git.Head(ctx, repo, "refs/heads/"+branch)
 	if err != nil {
 		return nil, fmt.Errorf("read canonical head: %w", err)
 	}
@@ -113,7 +136,7 @@ func Integrate(ctx context.Context, repo, branch string, cs *changeset.Changeset
 	if err != nil || !ok {
 		return nil, fmt.Errorf("not fast-forwardable: %w", err)
 	}
-	if err := git.UpdateRef(ctx, repo, "refs/heads/"+branch, newSHA); err != nil {
+	if err := git.AdvanceCanonical(ctx, repo, branch, head, newSHA); err != nil {
 		return nil, fmt.Errorf("advance branch: %w", err)
 	}
 	cs.Status = changeset.Merged

@@ -5,12 +5,15 @@
 package runner
 
 import (
-	"bytes"
+	"ballast/internal/executil"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -55,7 +58,7 @@ func (c *Client) do(method, path string, body, out any) (int, error) {
 	}
 	defer res.Body.Close()
 	if out != nil && res.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+		if err := json.NewDecoder(io.LimitReader(res.Body, 8<<20)).Decode(out); err != nil {
 			return res.StatusCode, fmt.Errorf("decode %s: %w", path, err)
 		}
 	}
@@ -117,7 +120,14 @@ func runTest(ctx context.Context, dir, command string) (exit int, output string)
 	}
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	cmd.Dir = dir
-	var buf bytes.Buffer
+	executil.Configure(cmd)
+	home, err := os.MkdirTemp("", "ballast-test-home-*")
+	if err != nil {
+		return -1, err.Error()
+	}
+	defer os.RemoveAll(home)
+	cmd.Env = append(cmd.Env, "HOME="+home)
+	var buf executil.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	if err := cmd.Run(); err != nil {
@@ -133,8 +143,10 @@ func runTest(ctx context.Context, dir, command string) (exit int, output string)
 // Client and Adapters are interfaces so tests fake both without HTTP
 // or subprocesses.
 type Executor struct {
-	Client   Reporter
-	Adapters []agent.Adapter
+	WorktreeRoot string
+	Timeout      time.Duration
+	Client       Reporter
+	Adapters     []agent.Adapter
 }
 
 // Reporter is the control-plane surface the executor needs.
@@ -149,8 +161,12 @@ func pickAdapter(adapters []agent.Adapter, want string) agent.Adapter {
 			return a
 		}
 	}
-	if len(adapters) > 0 {
-		return adapters[0]
+	if want == "" {
+		for _, a := range adapters {
+			if a.Available(context.Background()) {
+				return a
+			}
+		}
 	}
 	return nil
 }
@@ -165,9 +181,30 @@ func (e *Executor) RunOnce(ctx context.Context, runnerID string, poll func() (ap
 	if !ok {
 		return false, nil
 	}
+	timeout := e.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if e.WorktreeRoot != "" {
+		root, err := filepath.EvalSymlinks(e.WorktreeRoot)
+		if err != nil {
+			return true, err
+		}
+		path, err := filepath.EvalSymlinks(item.Path)
+		if err != nil {
+			return true, err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return true, fmt.Errorf("assigned path outside worktree root")
+		}
+	}
 	a := pickAdapter(e.Adapters, item.Adapter)
 	if a == nil {
-		return true, fmt.Errorf("no adapter available (wanted %q)", item.Adapter)
+		_, err := e.Client.Report(runnerID, api.WorkResult{WorkspaceID: item.WorkspaceID, ExitCode: -1, Stderr: "requested adapter unavailable"})
+		return true, err
 	}
 	if err := e.Client.SetStatus(item.WorkspaceID, "RUNNING"); err != nil {
 		return true, fmt.Errorf("mark running: %w", err)

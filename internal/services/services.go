@@ -7,6 +7,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"sync"
 
 	"ballast/internal/changeset"
 	"ballast/internal/git"
@@ -18,6 +20,7 @@ import (
 // Repo persists domain records. Memory and Postgres implementations live
 // in internal/store. Upsert semantics: Save creates or overwrites by ID.
 type Repo interface {
+	ListProjects(ctx context.Context) ([]project.Project, error)
 	SaveProject(ctx context.Context, p project.Project) error
 	GetProject(ctx context.Context, id string) (project.Project, error)
 	SetCanonicalHead(ctx context.Context, id, sha string) error
@@ -48,7 +51,18 @@ func (s *Projects) Create(name, repo, branch string) (any, error) {
 	if branch == "" {
 		branch = "main"
 	}
-	head, err := git.Head(ctx, repo, "HEAD")
+	repo, err := filepath.Abs(repo)
+	if err != nil {
+		return nil, err
+	}
+	repo, err = filepath.EvalSymlinks(repo)
+	if err != nil {
+		return nil, err
+	}
+	if err = git.ValidateBranch(ctx, repo, branch); err != nil {
+		return nil, err
+	}
+	head, err := git.Head(ctx, repo, "refs/heads/"+branch)
 	if err != nil {
 		return nil, fmt.Errorf("repository not readable: %w", err)
 	}
@@ -75,6 +89,7 @@ func (s *Projects) Head(id string) (string, error) {
 
 // Tasks owns the board. Transitions are guarded by task rules.
 type Tasks struct {
+	mu   sync.Mutex
 	Repo Repo
 }
 
@@ -110,6 +125,8 @@ func (s *Tasks) List(projectID string) ([]any, error) {
 }
 
 func (s *Tasks) Transition(id, to string) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ctx := context.Background()
 	t, err := s.Repo.GetTask(ctx, id)
 	if err != nil {
@@ -140,9 +157,7 @@ func (s *Workspaces) Reattach(ctx context.Context, projectID string) (int, error
 	}
 	n := 0
 	for _, w := range list {
-		switch w.Status {
-		case workspace.Creating, workspace.Ready, workspace.Running,
-			workspace.Waiting, workspace.Conflicted:
+		if w.Status != workspace.Destroyed {
 			w := w
 			s.Mgr.Attach(&w)
 			n++
@@ -156,17 +171,25 @@ func (s *Workspaces) Create(projectID, taskID, repo string) (any, error) {
 	if _, err := s.Repo.GetProject(ctx, projectID); err != nil {
 		return nil, fmt.Errorf("unknown project: %w", err)
 	}
-	if _, err := s.Repo.GetTask(ctx, taskID); err != nil {
+	t, err := s.Repo.GetTask(ctx, taskID)
+	if err != nil {
 		return nil, fmt.Errorf("unknown task: %w", err)
 	}
-	if repo == "" {
-		p, err := s.Repo.GetProject(ctx, projectID)
-		if err != nil {
-			return nil, err
-		}
-		repo = p.RepoPath
+	if t.ProjectID != projectID {
+		return nil, fmt.Errorf("task does not belong to project")
 	}
-	w, err := s.Mgr.Create(ctx, projectID, taskID, repo)
+	p, err := s.Repo.GetProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if repo != "" && repo != p.RepoPath {
+		return nil, fmt.Errorf("repository must match project")
+	}
+	base, err := git.Head(ctx, p.RepoPath, "refs/heads/"+p.Branch)
+	if err != nil {
+		return nil, err
+	}
+	w, err := s.Mgr.CreateAt(ctx, projectID, taskID, p.RepoPath, base)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +252,10 @@ func (s *Changesets) Build(projectID, taskID, agentID, wsID string) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	cs, err := changeset.Build(ctx, projectID, taskID, agentID, w.Path, w.Base)
+	if projectID != "" && projectID != w.ProjectID || taskID != "" && taskID != w.TaskID {
+		return nil, fmt.Errorf("workspace ownership mismatch")
+	}
+	cs, err := changeset.Build(ctx, w.ProjectID, w.TaskID, agentID, w.Path, w.Base)
 	if err != nil {
 		return nil, err
 	}
@@ -251,11 +277,14 @@ func (s *Changesets) Decide(id, decision, _ string) (any, error) {
 	}
 	switch decision {
 	case "approve":
-		if cs.Status != changeset.InReview && cs.Status != changeset.NeedsRebase {
+		if cs.Status != changeset.InReview {
 			return nil, fmt.Errorf("cannot approve from %s", cs.Status)
 		}
 		cs.Status = changeset.Approved
 	case "reject":
+		if cs.Status != changeset.InReview && cs.Status != changeset.Approved {
+			return nil, fmt.Errorf("cannot reject from %s", cs.Status)
+		}
 		cs.Status = changeset.Rejected
 	default:
 		return nil, fmt.Errorf("decision must be approve|reject")
@@ -264,4 +293,48 @@ func (s *Changesets) Decide(id, decision, _ string) (any, error) {
 		return nil, err
 	}
 	return cs, nil
+}
+
+func (s *Projects) List() ([]project.Project, error) {
+	return s.Repo.ListProjects(context.Background())
+}
+
+// Recover preserves files and blocks interrupted execution. Commands are never
+// automatically replayed after a control-plane restart.
+func Recover(ctx context.Context, repo Repo, mgr *workspace.Manager) error {
+	ps, err := repo.ListProjects(ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range ps {
+		ws, err := repo.ListWorkspaces(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		for _, w := range ws {
+			if w.Status == workspace.Destroyed {
+				continue
+			}
+			if w.Status == workspace.Creating || w.Status == workspace.Ready || w.Status == workspace.Running || w.Status == workspace.Waiting {
+				w.Status = workspace.Failed
+				if err := repo.SaveWorkspace(ctx, w); err != nil {
+					return err
+				}
+			}
+			mgr.Attach(&w)
+		}
+		ts, err := repo.ListTasks(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		for _, t := range ts {
+			if t.Status == task.Running {
+				t.Transition(task.Blocked)
+				if err := repo.SaveTask(ctx, t); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }

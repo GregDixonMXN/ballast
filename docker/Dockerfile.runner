@@ -1,12 +1,16 @@
-FROM golang:1.23-alpine AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
-COPY go.mod go.sum* ./
+COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /out/runner ./cmd/runner
+COPY cmd ./cmd
+COPY internal ./internal
+COPY migrations ./migrations
+RUN CGO_ENABLED=0 go build -trimpath -o /out/ballast-runner ./cmd/runner
 
-FROM alpine:3.20
-RUN apk add --no-cache git docker-cli ca-certificates
-WORKDIR /app
-COPY --from=build /out/runner /app/runner
-ENTRYPOINT ["/app/runner"]
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/ballast-runner /usr/local/bin/ballast-runner
+RUN mkdir -p /data && chown 65534:65534 /data
+WORKDIR /data
+USER 65534:65534
+ENTRYPOINT ["ballast-runner"]
