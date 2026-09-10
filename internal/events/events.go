@@ -20,6 +20,8 @@ type Type string
 const (
 	ProjectCreated     Type = "project.created"
 	TaskCreated        Type = "task.created"
+	TaskUpdated        Type = "task.updated"
+	TaskDeleted        Type = "task.deleted"
 	TaskAssigned       Type = "task.assigned"
 	WorkspaceCreated   Type = "workspace.created"
 	WorkspaceReady     Type = "workspace.ready"

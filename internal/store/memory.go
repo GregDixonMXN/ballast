@@ -90,6 +90,16 @@ func (m *MemoryRepo) ListTasks(_ context.Context, projectID string) ([]task.Task
 	return out, nil
 }
 
+func (m *MemoryRepo) DeleteTask(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.ta[id]; !ok {
+		return fmt.Errorf("unknown task %s", id)
+	}
+	delete(m.ta, id)
+	return nil
+}
+
 func (m *MemoryRepo) SaveWorkspace(_ context.Context, w workspace.Workspace) error {
 	m.mu.Lock()
 	m.ws[w.ID] = w
@@ -118,6 +128,16 @@ func (m *MemoryRepo) ListWorkspaces(_ context.Context, projectID string) ([]work
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+func (m *MemoryRepo) DeleteWorkspace(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.ws[id]; !ok {
+		return fmt.Errorf("unknown workspace %s", id)
+	}
+	delete(m.ws, id)
+	return nil
 }
 
 func (m *MemoryRepo) SaveChangeset(_ context.Context, c changeset.Changeset) error {

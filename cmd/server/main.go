@@ -79,7 +79,7 @@ func main() {
 	srv := api.New(bus, toks)
 	srv.EventStore = eventSto
 	srv.Projects = &services.Projects{Repo: repo}
-	srv.Tasks = &services.Tasks{Repo: repo}
+	srv.Tasks = &services.Tasks{Repo: repo, Mgr: mgr}
 	srv.Workspaces = &services.Workspaces{Repo: repo, Mgr: mgr}
 	srv.Changesets = &services.Changesets{Repo: repo}
 

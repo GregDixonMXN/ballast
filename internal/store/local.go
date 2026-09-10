@@ -290,8 +290,29 @@ func (l *LocalRepo) SetCanonicalHead(ctx context.Context, id, sha string) error 
 func (l *LocalRepo) SaveTask(ctx context.Context, t task.Task) error {
 	return l.update(ctx, func(s *snapshot) error { s.Tasks[t.ID] = t; return nil })
 }
+
+func (l *LocalRepo) DeleteTask(ctx context.Context, id string) error {
+	return l.update(ctx, func(s *snapshot) error {
+		if _, ok := s.Tasks[id]; !ok {
+			return fmt.Errorf("unknown task %s", id)
+		}
+		delete(s.Tasks, id)
+		return nil
+	})
+}
+
 func (l *LocalRepo) SaveWorkspace(ctx context.Context, w workspace.Workspace) error {
 	return l.update(ctx, func(s *snapshot) error { s.Workspaces[w.ID] = w; return nil })
+}
+
+func (l *LocalRepo) DeleteWorkspace(ctx context.Context, id string) error {
+	return l.update(ctx, func(s *snapshot) error {
+		if _, ok := s.Workspaces[id]; !ok {
+			return fmt.Errorf("unknown workspace %s", id)
+		}
+		delete(s.Workspaces, id)
+		return nil
+	})
 }
 func (l *LocalRepo) SaveChangeset(ctx context.Context, c changeset.Changeset) error {
 	return l.update(ctx, func(s *snapshot) error { s.Changesets[c.ID] = c; return nil })

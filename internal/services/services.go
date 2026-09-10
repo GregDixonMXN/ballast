@@ -6,9 +6,11 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"ballast/internal/changeset"
 	"ballast/internal/git"
@@ -28,10 +30,12 @@ type Repo interface {
 	SaveTask(ctx context.Context, t task.Task) error
 	GetTask(ctx context.Context, id string) (task.Task, error)
 	ListTasks(ctx context.Context, projectID string) ([]task.Task, error)
+	DeleteTask(ctx context.Context, id string) error
 
 	SaveWorkspace(ctx context.Context, w workspace.Workspace) error
 	GetWorkspace(ctx context.Context, id string) (workspace.Workspace, error)
 	ListWorkspaces(ctx context.Context, projectID string) ([]workspace.Workspace, error)
+	DeleteWorkspace(ctx context.Context, id string) error
 
 	SaveChangeset(ctx context.Context, c changeset.Changeset) error
 	GetChangeset(ctx context.Context, id string) (changeset.Changeset, error)
@@ -91,7 +95,11 @@ func (s *Projects) Head(id string) (string, error) {
 type Tasks struct {
 	mu   sync.Mutex
 	Repo Repo
+	Mgr  *workspace.Manager // optional: cascade worktree removal on delete
 }
+
+// ErrTaskRunning refuses mutation while a runner holds the task.
+var ErrTaskRunning = errors.New("task is running")
 
 func (s *Tasks) Create(projectID, title, desc string, scopes []string) (any, error) {
 	ctx := context.Background()
@@ -139,6 +147,65 @@ func (s *Tasks) Transition(id, to string) (any, error) {
 		return nil, err
 	}
 	return t, nil
+}
+
+// Update rewrites title/description/scopes. Refused while RUNNING —
+// the runner holds a prompt snapshot taken at assignment.
+func (s *Tasks) Update(id, title, desc string, scopes []string) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx := context.Background()
+	t, err := s.Repo.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if t.Status == task.Running {
+		return nil, ErrTaskRunning
+	}
+	if title != "" {
+		t.Title = title
+	}
+	t.Description = desc
+	if scopes != nil {
+		t.Scopes = scopes
+	}
+	t.UpdatedAt = time.Now().UTC()
+	if err := s.Repo.SaveTask(ctx, t); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// Delete removes the task and its workspaces (records + worktree
+// dirs). Refused while RUNNING — requeue first. Changesets stay:
+// review history outlives the task that produced it.
+func (s *Tasks) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx := context.Background()
+	t, err := s.Repo.GetTask(ctx, id)
+	if err != nil {
+		return err
+	}
+	if t.Status == task.Running {
+		return ErrTaskRunning
+	}
+	ws, err := s.Repo.ListWorkspaces(ctx, t.ProjectID)
+	if err != nil {
+		return err
+	}
+	for _, w := range ws {
+		if w.TaskID != id {
+			continue
+		}
+		if s.Mgr != nil {
+			_ = s.Mgr.Destroy(ctx, w.ID)
+		}
+		if err := s.Repo.DeleteWorkspace(ctx, w.ID); err != nil {
+			return err
+		}
+	}
+	return s.Repo.DeleteTask(ctx, id)
 }
 
 // Workspaces binds tasks to isolated worktrees. The Manager owns the

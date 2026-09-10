@@ -5,6 +5,7 @@ import (
 
 	"ballast/internal/changeset"
 	"ballast/internal/events"
+	"ballast/internal/services"
 )
 
 // Handlers below are thin: services are injected in production wiring
@@ -105,6 +106,59 @@ func (s *Server) transitionTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, t)
+}
+
+func taskWriteError(w http.ResponseWriter, err error) {
+	if err == services.ErrTaskRunning {
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 400, map[string]string{"error": err.Error()})
+}
+
+func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Scopes      []string `json:"scopes"`
+		HasScopes   bool     `json:"has_scopes"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	if s.Tasks == nil {
+		writeJSON(w, 501, map[string]string{"error": "task service not wired"})
+		return
+	}
+	var scopes []string
+	if in.HasScopes {
+		scopes = in.Scopes
+	}
+	t, err := s.Tasks.Update(r.PathValue("id"), in.Title, in.Description, scopes)
+	if err != nil {
+		taskWriteError(w, err)
+		return
+	}
+	_ = s.bus.Publish(r.Context(), events.New("", events.ActorHuman, "", events.TaskUpdated, r.PathValue("id"), nil))
+	writeJSON(w, 200, t)
+}
+
+func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
+	if s.Tasks == nil {
+		writeJSON(w, 501, map[string]string{"error": "task service not wired"})
+		return
+	}
+	if err := s.Tasks.Delete(r.PathValue("id")); err != nil {
+		if err == services.ErrTaskRunning {
+			writeJSON(w, 409, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	_ = s.bus.Publish(r.Context(), events.New("", events.ActorHuman, "", events.TaskDeleted, r.PathValue("id"), nil))
+	writeJSON(w, 200, map[string]string{"deleted": r.PathValue("id")})
 }
 
 func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {

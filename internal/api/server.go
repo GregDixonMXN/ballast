@@ -47,6 +47,8 @@ type TaskService interface {
 	Get(id string) (any, error)
 	List(projectID string) ([]any, error)
 	Transition(id, to string) (any, error)
+	Update(id, title, desc string, scopes []string) (any, error)
+	Delete(id string) error
 }
 type WorkspaceService interface {
 	Create(projectID, taskID, repo string) (any, error)
@@ -83,6 +85,8 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s.mux.HandleFunc("POST /projects/{id}/tasks", s.requireAuth(s.createTask))
 	s.mux.HandleFunc("GET /projects/{id}/tasks", s.requireAuth(s.listTasks))
 	s.mux.HandleFunc("POST /tasks/{id}/transition", s.requireAuth(s.transitionTask))
+	s.mux.HandleFunc("PATCH /tasks/{id}", s.requireAuth(s.updateTask))
+	s.mux.HandleFunc("DELETE /tasks/{id}", s.requireAuth(s.deleteTask))
 	s.mux.HandleFunc("POST /projects/{id}/workspaces", s.requireAuth(s.createWorkspace))
 	s.mux.HandleFunc("GET /projects/{id}/workspaces", s.requireAuth(s.listWorkspaces))
 	s.mux.HandleFunc("GET /workspaces/{id}", s.requireAuth(s.getWorkspace))

@@ -131,3 +131,69 @@ func TestServicesVerticalSlice(t *testing.T) {
 		t.Fatalf("tasks = %v %v", list, err)
 	}
 }
+
+func TestTasksUpdateDelete(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	mgr := workspace.NewManager(t.TempDir())
+	ts := &Tasks{Repo: repo, Mgr: mgr}
+	ws := &Workspaces{Repo: repo, Mgr: mgr}
+	ctx := context.Background()
+
+	p, err := (&Projects{Repo: repo}).Create("demo", gitRepo(t), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := mustID(t, p)
+
+	ta, err := ts.Create(projectID, "Old title", "old desc", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tid := mustID(t, ta)
+
+	upd, err := ts.Update(tid, "New title", "new desc", []string{"src/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upd.(task.Task).Title != "New title" || upd.(task.Task).Description != "new desc" {
+		t.Fatalf("update not applied: %+v", upd)
+	}
+
+	if _, err := ts.Transition(tid, "RUNNING"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ts.Update(tid, "x", "y", nil); err != ErrTaskRunning {
+		t.Fatalf("RUNNING update must refuse, got %v", err)
+	}
+	if err := ts.Delete(tid); err != ErrTaskRunning {
+		t.Fatalf("RUNNING delete must refuse, got %v", err)
+	}
+	if _, err := ts.Transition(tid, "TODO"); err != nil {
+		t.Fatal(err)
+	}
+
+	wa, err := ws.Create(projectID, tid, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wid := mustID(t, wa)
+	wrec, _ := repo.GetWorkspace(ctx, wid)
+	if _, err := os.Stat(wrec.Path); err != nil {
+		t.Fatalf("worktree missing: %v", err)
+	}
+	if err := ts.Delete(tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetTask(ctx, tid); err == nil {
+		t.Fatal("task record must be gone")
+	}
+	if _, err := repo.GetWorkspace(ctx, wid); err == nil {
+		t.Fatal("workspace record must be gone")
+	}
+	if _, err := os.Stat(wrec.Path); !os.IsNotExist(err) {
+		t.Fatal("worktree dir must be gone")
+	}
+	if err := ts.Delete(tid); err == nil {
+		t.Fatal("double delete must fail")
+	}
+}

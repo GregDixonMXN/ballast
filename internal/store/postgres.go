@@ -114,6 +114,17 @@ updated_at=EXCLUDED.updated_at`,
 	return err
 }
 
+func (p *PGRepo) DeleteTask(ctx context.Context, id string) error {
+	res, err := p.db.ExecContext(ctx, `DELETE FROM tasks WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("unknown task %s", id)
+	}
+	return nil
+}
+
 func scanTask(row *sql.Row) (task.Task, error) {
 	var t task.Task
 	var scopes []byte
@@ -183,6 +194,17 @@ status=EXCLUDED.status, updated_at=EXCLUDED.updated_at`,
 		w.ID, w.ProjectID, w.TaskID, nullUUID(w.AgentID), nullUUID(w.RunnerID),
 		w.RepoPath, w.Base, w.Path, string(w.Status), w.CreatedAt, w.UpdatedAt)
 	return err
+}
+
+func (p *PGRepo) DeleteWorkspace(ctx context.Context, id string) error {
+	res, err := p.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("unknown workspace %s", id)
+	}
+	return nil
 }
 
 func scanWorkspace(row *sql.Row) (workspace.Workspace, error) {
