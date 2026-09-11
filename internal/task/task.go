@@ -28,6 +28,7 @@ type Task struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Scopes      []string  `json:"scopes,omitempty"`
+	DependsOn   []string  `json:"depends_on,omitempty"`
 	Status      Status    `json:"status"`
 	AssigneeID  string    `json:"assignee_id,omitempty"` // agent instance or user
 	CreatedAt   time.Time `json:"created_at"`
@@ -39,6 +40,18 @@ func New(projectID, title, desc string, scopes []string) Task {
 	now := time.Now().UTC()
 	return Task{ID: uuid.NewString(), ProjectID: projectID, Title: title,
 		Description: desc, Scopes: scopes, Status: Todo, CreatedAt: now, UpdatedAt: now}
+}
+
+// Ready reports whether every dependency is DONE. A task with no
+// dependencies is always ready.
+func Ready(t Task, byID map[string]Task) bool {
+	for _, dep := range t.DependsOn {
+		d, ok := byID[dep]
+		if !ok || d.Status != Done {
+			return false
+		}
+	}
+	return true
 }
 
 // Transition enforces the legal board moves.

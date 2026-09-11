@@ -159,6 +159,24 @@ func (s *Server) pollWork(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, item)
 }
 
+// taskReady reports whether t's dependencies are all DONE.
+func (s *Server) taskReady(t task.Task) bool {
+	if len(t.DependsOn) == 0 {
+		return true
+	}
+	ts, err := s.Tasks.List(t.ProjectID)
+	if err != nil {
+		return false
+	}
+	byID := make(map[string]task.Task, len(ts))
+	for _, v := range ts {
+		if tt, ok := v.(task.Task); ok {
+			byID[tt.ID] = tt
+		}
+	}
+	return task.Ready(t, byID)
+}
+
 func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 	s.dispatch.operation.Lock()
 	defer s.dispatch.operation.Unlock()
@@ -193,6 +211,10 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if t.Status != task.Todo {
 		writeJSON(w, 409, map[string]string{"error": "only TODO tasks can be assigned"})
+		return
+	}
+	if !s.taskReady(t) {
+		writeJSON(w, 409, map[string]string{"error": "dependencies not DONE"})
 		return
 	}
 

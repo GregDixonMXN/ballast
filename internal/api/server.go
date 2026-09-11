@@ -51,8 +51,10 @@ type ProjectService interface {
 }
 type TaskService interface {
 	Create(projectID, title, desc string, scopes []string) (any, error)
+	CreateWithDeps(projectID, title, desc string, scopes, depends []string) (any, error)
 	Get(id string) (any, error)
 	List(projectID string) ([]any, error)
+	Ready(projectID string) ([]any, error)
 	Transition(id, to string) (any, error)
 	Update(id, title, desc string, scopes []string) (any, error)
 	Delete(id string) error
@@ -92,6 +94,7 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s.mux.HandleFunc("GET /projects/{id}", s.requireAuth(s.getProject))
 	s.mux.HandleFunc("POST /projects/{id}/tasks", s.requireAuth(s.createTask))
 	s.mux.HandleFunc("GET /projects/{id}/tasks", s.requireAuth(s.listTasks))
+	s.mux.HandleFunc("GET /projects/{id}/ready", s.requireAuth(s.readyTasks))
 	s.mux.HandleFunc("POST /tasks/{id}/transition", s.requireAuth(s.transitionTask))
 	s.mux.HandleFunc("PATCH /tasks/{id}", s.requireAuth(s.updateTask))
 	s.mux.HandleFunc("DELETE /tasks/{id}", s.requireAuth(s.deleteTask))

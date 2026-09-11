@@ -102,6 +102,12 @@ type Tasks struct {
 var ErrTaskRunning = errors.New("task is running")
 
 func (s *Tasks) Create(projectID, title, desc string, scopes []string) (any, error) {
+	return s.CreateWithDeps(projectID, title, desc, scopes, nil)
+}
+
+// CreateWithDeps creates a TODO task with dependency edges. Unknown dep
+// IDs are rejected so the graph stays valid.
+func (s *Tasks) CreateWithDeps(projectID, title, desc string, scopes, depends []string) (any, error) {
 	ctx := context.Background()
 	if title == "" {
 		return nil, fmt.Errorf("title required")
@@ -110,10 +116,30 @@ func (s *Tasks) Create(projectID, title, desc string, scopes []string) (any, err
 		return nil, fmt.Errorf("unknown project: %w", err)
 	}
 	t := task.New(projectID, title, desc, scopes)
+	t.DependsOn = depends
 	if err := s.Repo.SaveTask(ctx, t); err != nil {
 		return nil, err
 	}
 	return t, nil
+}
+
+// Ready returns TODO tasks whose dependencies are all DONE.
+func (s *Tasks) Ready(projectID string) ([]any, error) {
+	ts, err := s.Repo.ListTasks(context.Background(), projectID)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]task.Task, len(ts))
+	for _, t := range ts {
+		byID[t.ID] = t
+	}
+	var out []any
+	for _, t := range ts {
+		if t.Status == task.Todo && task.Ready(t, byID) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (s *Tasks) Get(id string) (any, error) {

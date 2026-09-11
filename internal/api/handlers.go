@@ -56,6 +56,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		Title       string   `json:"title"`
 		Description string   `json:"description"`
 		Scopes      []string `json:"scopes"`
+		DependsOn   []string `json:"depends_on"`
 	}
 	if err := decodeJSON(r, &in); err != nil || in.Title == "" {
 		writeJSON(w, 400, map[string]string{"error": "title required"})
@@ -65,7 +66,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 501, map[string]string{"error": "task service not wired"})
 		return
 	}
-	t, err := s.Tasks.Create(r.PathValue("id"), in.Title, in.Description, in.Scopes)
+	t, err := s.Tasks.CreateWithDeps(r.PathValue("id"), in.Title, in.Description, in.Scopes, in.DependsOn)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -84,6 +85,24 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
+	}
+	writeJSON(w, 200, ts)
+}
+
+// readyTasks lists TODO tasks whose dependencies are all DONE — the
+// assignable frontier for autonomous supervision.
+func (s *Server) readyTasks(w http.ResponseWriter, r *http.Request) {
+	if s.Tasks == nil {
+		writeJSON(w, 501, map[string]string{"error": "task service not wired"})
+		return
+	}
+	ts, err := s.Tasks.Ready(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if ts == nil {
+		ts = []any{}
 	}
 	writeJSON(w, 200, ts)
 }
