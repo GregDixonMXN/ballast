@@ -30,6 +30,7 @@ type Task struct {
 	Scopes      []string  `json:"scopes,omitempty"`
 	DependsOn   []string  `json:"depends_on,omitempty"`
 	TestCommand string    `json:"test_command,omitempty"`
+	Command     string    `json:"command,omitempty"` // dumb-runner TASK_CMD: shell run in the worktree (e.g. `sh -c '…'` body, `claude -p "…"`)
 	Status      Status    `json:"status"`
 	AssigneeID  string    `json:"assignee_id,omitempty"` // agent instance or user
 	CreatedAt   time.Time `json:"created_at"`

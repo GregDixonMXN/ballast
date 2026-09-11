@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# A full, isolated API workflow, not a mutation of an existing repository.
+# Ballast overlap demo: two writers, one file, no model, no keys.
+# First integrate wins; the loser is marked NEEDS_REBASE/CONFLICTED —
+# never silently force-merged. Exit 0 only if that story holds.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 build=$(mktemp -d)
 trap 'rm -rf -- "$build"' EXIT
 "${GO:-go}" build -o "$build/ballast-server" ./cmd/server
-python3 tests/release_smoke.py --bin-dir "$build"
+"${GO:-go}" build -o "$build/ballast-runner" ./cmd/runner
+python3 tests/demo_overlap.py "$build"

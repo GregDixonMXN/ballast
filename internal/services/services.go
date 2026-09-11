@@ -179,12 +179,13 @@ func (s *Tasks) Create(projectID, title, desc string, scopes []string) (any, err
 // CreateWithDeps creates a TODO task with dependency edges. Unknown dep
 // IDs are rejected so the graph stays valid.
 func (s *Tasks) CreateWithDeps(projectID, title, desc string, scopes, depends []string) (any, error) {
-	return s.CreateFull(projectID, title, desc, scopes, depends, "")
+	return s.CreateFull(projectID, title, desc, scopes, depends, "", "")
 }
 
-// CreateFull creates a TODO task with deps and an optional per-task gate
-// override. Empty gate inherits the project test command at assign time.
-func (s *Tasks) CreateFull(projectID, title, desc string, scopes, depends []string, gate string) (any, error) {
+// CreateFull creates a TODO task with deps, an optional per-task gate
+// override, and an optional dumb-runner command. Empty gate inherits
+// the project test command at assign time.
+func (s *Tasks) CreateFull(projectID, title, desc string, scopes, depends []string, gate, command string) (any, error) {
 	ctx := context.Background()
 	if title == "" {
 		return nil, fmt.Errorf("title required")
@@ -195,6 +196,7 @@ func (s *Tasks) CreateFull(projectID, title, desc string, scopes, depends []stri
 	t := task.New(projectID, title, desc, scopes)
 	t.DependsOn = depends
 	t.TestCommand = gate
+	t.Command = command
 	if err := s.Repo.SaveTask(ctx, t); err != nil {
 		return nil, err
 	}

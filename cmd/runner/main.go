@@ -38,8 +38,10 @@ func main() {
 	agentBin := flag.String("agent", os.Getenv("AGENT_BIN"), "custom agent binary (extra adapter)")
 	agentHome := flag.String("agent-home", "", "explicit dedicated agent login/config home (read/write by agents); default disposable unauthenticated home")
 	modelKeyFile := flag.String("model-key-file", "", "API key file enabling the in-process tool-loop adapter (reads key once at startup, never logged)")
-	modelName := flag.String("model", "muse-spark-1.3-contributor", "model id for the tool-loop adapter")
+	modelName := flag.String("model", "", "model id for the tool-loop adapter (requires -model-key-file and BALLAST_BRAIN=1)")
 	modelBaseURL := flag.String("model-base-url", "https://api.meta.ai/v1", "OpenAI-compatible base URL for the tool-loop adapter")
+	paldronPolicy := flag.String("paldron-policy", "", "paldron policy file gating TASK_CMD (empty skips the gate)")
+	noWrap := flag.Bool("no-wrap", false, "run TASK_CMD raw even when annalist/paldron binaries exist")
 	once := flag.Bool("once", false, "poll once and exit")
 	flag.Parse()
 	if *showVersion {
@@ -60,10 +62,19 @@ func main() {
 		log.Fatalf("credential: %v", err)
 	}
 	adapters := agent.Registry(nil)
+	// The dumb command adapter is always on: `sh -c <TASK_CMD>` in the
+	// worktree, optionally wrapped in annalist/paldron when present.
+	// No model, no conversation — run, gate, exit.
+	adapters = append(adapters, agent.Cmd(&agent.DumbWrap{PaldronPolicy: *paldronPolicy, NoWrap: *noWrap}))
 	if *agentBin != "" {
 		adapters = append(adapters, agent.NewShell("custom", *agentBin, nil))
 	}
-	if *modelKeyFile != "" {
+	// The inner tool loop is frozen behind BALLAST_BRAIN=1: it never
+	// starts on a default launch even with a key file present.
+	if os.Getenv("BALLAST_BRAIN") == "1" && *modelKeyFile != "" {
+		if *modelName == "" {
+			log.Fatal("tool-loop adapter needs -model explicitly; no model is configured by default")
+		}
 		key, err := readAPIKeyFile(*modelKeyFile)
 		if err != nil {
 			log.Fatalf("model key: %v", err)

@@ -82,6 +82,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		Scopes      []string `json:"scopes"`
 		DependsOn   []string `json:"depends_on"`
 		TestCommand string   `json:"test_command"`
+		Command     string   `json:"command"`
 	}
 	if err := decodeJSON(r, &in); err != nil || in.Title == "" {
 		writeJSON(w, 400, map[string]string{"error": "title required"})
@@ -91,7 +92,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 501, map[string]string{"error": "task service not wired"})
 		return
 	}
-	t, err := s.Tasks.CreateFull(r.PathValue("id"), in.Title, in.Description, in.Scopes, in.DependsOn, in.TestCommand)
+	t, err := s.Tasks.CreateFull(r.PathValue("id"), in.Title, in.Description, in.Scopes, in.DependsOn, in.TestCommand, in.Command)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

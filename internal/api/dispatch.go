@@ -46,6 +46,7 @@ type WorkItem struct {
 	Prompt      string `json:"prompt"`
 	Adapter     string `json:"adapter,omitempty"`
 	TestCommand string `json:"test_command,omitempty"`
+	Command     string `json:"command,omitempty"` // dumb-runner TASK_CMD, run in the worktree
 	Path        string `json:"path"`
 }
 
@@ -256,7 +257,11 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 	}
 	item := WorkItem{WorkspaceID: ws.ID, ProjectID: t.ProjectID, TaskID: t.ID,
 		Title: t.Title, Description: t.Description, Prompt: prompt,
-		Adapter: in.Adapter, TestCommand: firstNonEmpty(t.TestCommand, in.TestCommand), Path: ws.Path}
+		Adapter: in.Adapter, TestCommand: firstNonEmpty(t.TestCommand, in.TestCommand),
+		Command: t.Command, Path: ws.Path}
+	if item.Command != "" && item.Adapter == "" {
+		item.Adapter = "cmd" // bring your own agent as TASK_CMD: no model, just run it
+	}
 	if !s.dispatch.Enqueue(in.RunnerID, item) {
 		writeJSON(w, 404, map[string]string{"error": "unknown runner"})
 		return

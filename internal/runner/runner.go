@@ -298,7 +298,11 @@ func (e *Executor) RunOnce(ctx context.Context, runnerID string, poll func() (ap
 	if ca, ok := a.(interface{ SetWork(wsID, projectID string) }); ok {
 		ca.SetWork(item.WorkspaceID, item.ProjectID)
 	}
-	ex, err := a.StartTask(ctx, item.TaskID, item.Path, item.Prompt)
+	prompt := item.Prompt
+	if a.Name() == "cmd" && item.Command != "" {
+		prompt = item.Command // TASK_CMD runs raw; the description is not a shell script
+	}
+	ex, err := a.StartTask(ctx, item.TaskID, item.Path, prompt)
 	res := api.WorkResult{WorkspaceID: item.WorkspaceID}
 	if err != nil {
 		res.ExitCode = -1

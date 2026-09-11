@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,11 +58,55 @@ type ShellAdapter struct {
 	baseArg []string
 	Env     []string // extra env, filtered before spawn
 	Home    string   // explicit operator-selected agent config home; empty creates a disposable home
+	// TaskEnv injects per-task scoped env (task id, worktree path, policy
+	// paths). Values still pass through executil.Environment, so only
+	// PATH/LANG/LC_ALL/BALLAST_* survive — never credentials.
+	TaskEnv func(taskID, workspace string) []string
+	// DumbWrap, when non-nil, wraps the command as
+	//   annalist run -- paldron exec --policy P -- <binary...>
+	// with feature detection: missing binaries run raw with a warning
+	// on stderr. Only the "cmd" adapter sets this; codex/claude run bare.
+	DumbWrap *DumbWrap
 
 	mu    sync.Mutex
 	procs map[string]*exec.Cmd
 	pids  map[string]int
 	start map[string]time.Time
+}
+
+// DumbWrap configures the record-and-gate wrapper around TASK_CMD.
+type DumbWrap struct {
+	// PaldronPolicy enables the paldron exec gate; empty skips paldron.
+	PaldronPolicy string
+	// NoWrap forces the raw command even when the binaries exist.
+	NoWrap bool
+}
+
+// resolveWrap builds the argv prefix. Each element reports whether it
+// applied, so the runner can warn instead of silently changing shape.
+func (d *DumbWrap) resolveWrap() (prefix []string, notes []string) {
+	if d == nil || d.NoWrap {
+		return nil, nil
+	}
+	if _, err := exec.LookPath("annalist"); err == nil {
+		prefix = append(prefix, "annalist", "run", "--")
+		notes = append(notes, "annalist record on")
+	} else {
+		notes = append(notes, "annalist not found: running raw")
+	}
+	if d.PaldronPolicy != "" {
+		if _, err := exec.LookPath("paldron"); err == nil {
+			if st, err := os.Stat(d.PaldronPolicy); err == nil && !st.IsDir() {
+				prefix = append(prefix, "paldron", "exec", "--policy", d.PaldronPolicy, "--")
+				notes = append(notes, "paldron gate on")
+			} else {
+				notes = append(notes, "paldron policy unreadable: gate skipped")
+			}
+		} else {
+			notes = append(notes, "paldron not found: gate skipped")
+		}
+	}
+	return prefix, notes
 }
 
 // NewShell builds a generic command adapter: e.g. NewShell("codex",
@@ -81,12 +126,28 @@ func (s *ShellAdapter) Available(_ context.Context) bool {
 
 // StartTask spawns binary + baseArgs + prompt in workspace, capturing output.
 // The process is supervised; cancellation stops it and records the result.
+// With DumbWrap set (the "cmd" adapter), prompt is the TASK_CMD shell body
+// run as `sh -c <prompt>`, optionally wrapped in annalist/paldron, with
+// per-task scoped env from TaskEnv.
 func (s *ShellAdapter) StartTask(ctx context.Context, taskID, workspace, prompt string) (*Execution, error) {
-	args := append(append([]string{}, s.baseArg...), prompt)
-	cmd := exec.CommandContext(ctx, s.binary, args...)
+	argv := append([]string{s.binary}, s.baseArg...)
+	argv = append(argv, prompt)
+	var warnings string
+	if s.DumbWrap != nil {
+		prefix, notes := s.DumbWrap.resolveWrap()
+		argv = append(prefix, argv...)
+		if len(notes) > 0 {
+			warnings = "[ballast] " + strings.Join(notes, "; ") + "\n"
+		}
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workspace
 	executil.Configure(cmd)
-	cmd.Env = executil.Environment(s.Env)
+	env := append([]string{}, s.Env...)
+	if s.TaskEnv != nil {
+		env = append(env, s.TaskEnv(taskID, workspace)...)
+	}
+	cmd.Env = executil.Environment(env)
 	home := s.Home
 	if home == "" {
 		var err error
@@ -137,7 +198,7 @@ func (s *ShellAdapter) StartTask(ctx context.Context, taskID, workspace, prompt 
 	delete(s.procs, id)
 	s.mu.Unlock()
 	return &Execution{ID: id, TaskID: taskID, AgentID: s.name, Workspace: workspace,
-		Command: append([]string{s.binary}, args...), Stdout: so.String(), Stderr: se.String(),
+		Command: argv, Stdout: so.String(), Stderr: warnings + se.String(),
 		ExitCode: code, StartedAt: started, EndedAt: ended}, nil
 }
 
@@ -170,6 +231,18 @@ func (s *ShellAdapter) Status(_ context.Context, execID string) (Status, error) 
 		return Status{Running: false, PID: pid, StartedAt: s.start[execID]}, nil
 	}
 	return Status{}, fmt.Errorf("unknown execution %s", execID)
+}
+
+// Cmd returns the dumb command adapter: `sh -c <TASK_CMD>` in the
+// worktree. Bring your own agent as TASK_CMD — a shell line, another
+// CLI, anything. No model, no conversation, no retries: run, gate, exit.
+func Cmd(wrap *DumbWrap) *ShellAdapter {
+	a := NewShell("cmd", "sh", []string{"-c"})
+	a.DumbWrap = wrap
+	a.TaskEnv = func(taskID, workspace string) []string {
+		return []string{"BALLAST_TASK_ID=" + taskID, "BALLAST_WORKSPACE=" + workspace}
+	}
+	return a
 }
 
 // Codex returns the preferred first adapter: `codex exec <prompt>`.

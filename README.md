@@ -1,31 +1,16 @@
 # Ballast
 
-**A local control room for parallel software work.**
+**Git traffic cop for parallel humans and agents, on your own machine.**
 
-Plan tasks, give each worker its own Git worktree, inspect the result, and
-integrate reviewed changes into a canonical branch. Ballast keeps the task,
-workspace, changeset, and runner visible in one operational dashboard.
+Tasks → isolated Git worktrees → a dumb runner executes ONE command →
+changeset (files/diff/tests) → overlap/rebase check → approve/integrate.
+The dashboard on loopback views that state; it does not run your work.
 
 This is the **1.0.0-rc.1 local release candidate**, not a hosted service.
 
-## The workflow
-
-1. Register a local Git repository and choose its canonical branch.
-2. Create a task with a clear outcome.
-3. Create an isolated workspace for manual work, or assign a connected runner.
-4. Review the exact changed files and patch in a changeset.
-5. Approve or reject; integration is a separate, explicit action.
-6. Resolve stale bases and conflicts before retrying integration.
-
-The dashboard includes project overview, task planning, runner availability,
-workspace inspection, and changeset review. The API and CLI expose the same
-local control plane. No cloud account is required for manual work.
-
 ## Start locally
 
-Build prerequisites: **Go 1.27.1 or newer**, **Node.js 24**, npm, Git, Bash,
-curl, and Python 3 on Linux. The release archive includes the built Go binaries and
-standalone dashboard; it needs Node.js, Git, Bash, and curl but no compiler.
+Prerequisites: **Go 1.27.1+**, **Node.js 24**, Git, Bash, curl, Python 3 on Linux.
 
 ```bash
 ./scripts/build.sh
@@ -36,12 +21,59 @@ Open **http://127.0.0.1:3000**. The launcher prints the *path* to your private
 operator credential, never its value. Open that local file yourself and use
 the dashboard's connection form. Do not commit it or paste it into an issue.
 
-The launcher binds both services to loopback and keeps local state under
-`.ballast/`. It starts the API and dashboard; it does not start a worker or
-execute a task automatically. Ctrl+C stops the services.
+`start.sh` launches the API and dashboard only. It never starts a worker,
+never calls a model, never executes a task. Ctrl+C stops the services.
 
-See [Installation](docs/INSTALL.md) for archive installation, runner setup,
-ports, storage, and backup. [Security](SECURITY.md) explains the trust model.
+## Prove it with no model
+
+```bash
+./scripts/demo-green.sh  # one task, one file, end to end
+./scripts/demo.sh        # two writers, one file: loser is marked, never force-merged
+```
+
+Both run against temp repos and temp server state with network keys scrubbed
+from the environment. No API key, no agent CLI, no existing repo touched.
+Exit 0 means the story holds.
+
+## Bring your own agent as TASK_CMD
+
+A task's `command` is the whole agent: a shell line, another CLI, anything.
+
+```bash
+# task 1
+command: sh -c 'echo one >> src/a.txt'
+# or: command: claude -p "add retry logic to src/net.py"
+# or: command: codex exec "fix the failing test in web/"
+```
+
+The runner claims one READY task under a lease (409 if already claimed),
+runs the command with cwd pinned to that task's worktree, enforces the
+task timeout, then runs the task's `test_command` (per-task gate — a
+project-wide suite other tasks break will deadlock you, so keep gates
+scoped) and opens a changeset from the git diff. A model saying "tests
+passed" is not evidence; exit codes are. Then it exits. No conversation,
+no retries, no model inside Ballast's default path.
+
+## Optional: record and gate with Annalist + Paldron
+
+If the `annalist` and `paldron` binaries are on PATH, the runner wraps
+each command automatically:
+
+```text
+annalist run -- paldron exec --policy <paldron.toml> -- <TASK_CMD>
+```
+
+Missing binaries run the raw command with a warning on stderr
+(`--no-wrap` forces raw; `--paldron-policy` sets the policy file).
+Links: https://github.com/GregDixonMXN/annalist,
+https://github.com/GregDixonMXN/paldron
+
+## BALLAST_BRAIN (default off)
+
+The planner (outline → tasks), the supervise verifier (follow-up tasks),
+and the in-process model tool-loop do not run unless `BALLAST_BRAIN=1`.
+Default launches are facts only: assign, worktrees, gates, changesets,
+overlap, integrate.
 
 ## What isolation means
 
@@ -76,9 +108,4 @@ scheduler.
 | `scripts/` | Build, local launch, checks, packaging |
 | `docs/` | Installation, operations, verification, architecture |
 
-No distribution license has been selected in this repository. Its owner must
-choose licensing terms before redistributing a public release. No license or
-commercial support entitlement is implied by the release-candidate label.
-
-## Suite
-Works alone. With Paldron (policy gate + sandbox) and Docket (one policy for both): https://github.com/GregDixonMXN/paldron, https://github.com/GregDixonMXN/docket
+License: MIT — see [LICENSE](LICENSE).

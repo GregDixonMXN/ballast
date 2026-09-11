@@ -123,6 +123,7 @@ func main() {
 	fmt.Println("test-command:", *testCmd)
 
 	if *planFile != "" {
+		requireBrain("planner (--plan)")
 		if err := planProject(c); err != nil {
 			fmt.Fprintln(os.Stderr, "plan:", err)
 			os.Exit(1)
@@ -136,13 +137,17 @@ func main() {
 			fmt.Println("round", round, "error:", err)
 		} else if done {
 			if *outline != "" && followupsUsed < *maxFollowups {
-				more, verr := verifyAndFollowUp(c)
-				if verr != nil {
-					fmt.Println("verifier error:", verr)
-				}
-				if more {
-					time.Sleep(*interval)
-					continue
+				if os.Getenv("BALLAST_BRAIN") != "1" {
+					fmt.Println("verifier: skipped (needs BALLAST_BRAIN=1)")
+				} else {
+					more, verr := verifyAndFollowUp(c)
+					if verr != nil {
+						fmt.Println("verifier error:", verr)
+					}
+					if more {
+						time.Sleep(*interval)
+						continue
+					}
 				}
 			}
 			fmt.Println("project complete")
@@ -156,6 +161,17 @@ func main() {
 			return
 		}
 		time.Sleep(*interval)
+	}
+}
+
+// requireBrain refuses model-backed entry points unless the operator
+// explicitly opted in. The assign/review/integrate rounds are git and
+// test facts and always run; only the LLM pieces (planner, verifier)
+// need the flag.
+func requireBrain(what string) {
+	if os.Getenv("BALLAST_BRAIN") != "1" {
+		fmt.Fprintln(os.Stderr, what+" needs BALLAST_BRAIN=1")
+		os.Exit(2)
 	}
 }
 

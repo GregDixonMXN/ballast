@@ -45,11 +45,14 @@ func (b *Buffer) String() string {
 
 // Environment intentionally excludes inherited credentials, proxy settings,
 // Git/SSH configuration, loader hooks and the operator's home directory.
+// Only PATH/LANG/LC_ALL plus the BALLAST_ scoped task namespace
+// (BALLAST_TASK_ID, BALLAST_WORKSPACE, policy paths) pass through:
+// the operator credential can never ride along.
 func Environment(extra []string) []string {
 	out := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
 	for _, v := range extra {
 		key, _, ok := strings.Cut(v, "=")
-		if ok && (key == "PATH" || key == "LANG" || key == "LC_ALL") {
+		if ok && (key == "PATH" || key == "LANG" || key == "LC_ALL" || strings.HasPrefix(key, "BALLAST_")) {
 			out = append(out, v)
 		}
 	}
