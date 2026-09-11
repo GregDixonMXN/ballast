@@ -38,7 +38,7 @@ func NewLoop(name string, cfg LoopConfig) *LoopAdapter {
 		name = "loop"
 	}
 	if cfg.MaxTurns <= 0 {
-		cfg.MaxTurns = 40
+		cfg.MaxTurns = 60
 	}
 	return &LoopAdapter{name: name, cfg: cfg}
 }
