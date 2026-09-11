@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"ballast/internal/agent"
@@ -77,9 +78,12 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 	started := time.Now().UTC()
 	id := uuid.NewString()
 	var log strings.Builder
+	var logMu sync.Mutex
 	turn := func(format string, args ...any) {
 		s := fmt.Sprintf(format, args...)
+		logMu.Lock()
 		log.WriteString(s + "\n")
+		logMu.Unlock()
 		if l.cfg.OnTurn != nil {
 			l.cfg.OnTurn(s)
 		}
@@ -141,37 +145,85 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 			return done(id, taskID, workspace, started, log.String(), text, 0, ""), nil
 		}
 		turn("turn %d: %d tool call(s)", t, len(msg.ToolCalls))
-		for _, tc := range msg.ToolCalls {
-			var args map[string]any
-			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-				args = map[string]any{}
-			}
-			out, err := reg.Execute(ctx, workspace, tc.Function.Name, args)
-			result := out
-			if err != nil {
-				result = "ERROR: " + err.Error()
-			}
-			if strings.TrimSpace(result) == "" {
-				result = "(empty result)"
-			}
-			// The transcript log keeps everything; the model only gets
-			// the tail. Full command output in-context burns the window
-			// and buries the signal (a `cargo test` dump ended a run).
-			modelResult := result
-			if len(modelResult) > 2000 {
-				modelResult = "...[earlier output in transcript]...\n" + modelResult[len(modelResult)-2000:]
-			}
-			turn("  %s -> %s", tc.Function.Name, truncate(strings.TrimSpace(result), 300))
+		results := l.executeTurn(ctx, reg, workspace, msg.ToolCalls, turn)
+		for _, r := range results {
 			msgs = append(msgs, chatMessage{
 				Role:       "tool",
-				ToolCallID: tc.ID,
-				Content:    modelResult,
+				ToolCallID: r.id,
+				Content:    r.modelResult,
 			})
 		}
 	}
 	return done(id, taskID, workspace, started, log.String(), "", 2, "turn budget exhausted (%d turns)", l.cfg.MaxTurns), nil
 }
 
+// parallelSafe tools are read-only: concurrent execution cannot corrupt
+// the worktree. Everything else runs sequentially in call order.
+var parallelSafe = map[string]bool{"read_file": true, "list_dir": true}
+
+type turnResult struct {
+	id          string
+	modelResult string
+	logLine     string
+}
+
+// executeTurn runs one turn's tool calls: all-parallel when every call
+// is read-only, sequential otherwise. Results return in call order, and
+// transcript lines are emitted in call order too.
+func (l *LoopAdapter) executeTurn(ctx context.Context, reg *Registry, workspace string, calls []toolCall, turn func(string, ...any)) []turnResult {
+	allSafe := len(calls) > 0
+	for _, tc := range calls {
+		if !parallelSafe[tc.Function.Name] {
+			allSafe = false
+			break
+		}
+	}
+	results := make([]turnResult, len(calls))
+	if !allSafe {
+		for i, tc := range calls {
+			results[i] = runOne(ctx, reg, workspace, tc)
+			turn("  %s", results[i].logLine)
+		}
+		return results
+	}
+	var wg sync.WaitGroup
+	for i, tc := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = runOne(ctx, reg, workspace, tc)
+		}()
+	}
+	wg.Wait()
+	for _, r := range results {
+		turn("  %s", r.logLine)
+	}
+	return results
+}
+
+func runOne(ctx context.Context, reg *Registry, workspace string, tc toolCall) turnResult {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		args = map[string]any{}
+	}
+	out, err := reg.Execute(ctx, workspace, tc.Function.Name, args)
+	result := out
+	if err != nil {
+		result = "ERROR: " + err.Error()
+	}
+	if strings.TrimSpace(result) == "" {
+		result = "(empty result)"
+	}
+	// The transcript log keeps everything; the model only gets
+	// the tail. Full command output in-context burns the window
+	// and buries the signal (a `cargo test` dump ended a run).
+	modelResult := result
+	if len(modelResult) > 2000 {
+		modelResult = "...[earlier output in transcript]...\n" + modelResult[len(modelResult)-2000:]
+	}
+	line := fmt.Sprintf("%s -> %s", tc.Function.Name, truncate(strings.TrimSpace(result), 300))
+	return turnResult{id: tc.ID, modelResult: modelResult, logLine: line}
+}
 func done(id, taskID, workspace string, started time.Time, stdout, stderr string, code int, format string, args ...any) *agent.Execution {
 	if format != "" {
 		msg := fmt.Sprintf(format, args...)

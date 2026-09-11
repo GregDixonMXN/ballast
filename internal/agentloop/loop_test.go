@@ -108,3 +108,33 @@ func TestTurnBudgetTrips(t *testing.T) {
 		t.Fatalf("exit=%d calls=%d stderr=%s", ex.ExitCode, calls, ex.Stderr)
 	}
 }
+
+func TestParallelReadsKeepOrder(t *testing.T) {
+	wd := t.TempDir()
+	if err := os.WriteFile(wd+"/a.txt", []byte("A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wd+"/b.txt", []byte("B"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg := toolReply("x", "read_file", `{"path":"a.txt"}`)
+	msg.ToolCalls = append(msg.ToolCalls, toolCall{ID: "y", Type: "function",
+		Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "read_file", Arguments: `{"path":"b.txt"}`}})
+	srv := stubModel(t, []chatMessage{msg, {Role: "assistant", Content: "done"}})
+	defer srv.Close()
+	ad := NewLoop("loop", LoopConfig{Model: Config{BaseURL: srv.URL, APIKey: "k", Model: "m"}})
+	ex, err := ad.StartTask(context.Background(), "t1", wd, "read both")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex.ExitCode != 0 {
+		t.Fatalf("exit=%d\n%s", ex.ExitCode, ex.Stdout)
+	}
+	ia, ib := strings.Index(ex.Stdout, "read_file -> A"), strings.Index(ex.Stdout, "read_file -> B")
+	if ia < 0 || ib < 0 || ia > ib {
+		t.Fatalf("order not preserved:\n%s", ex.Stdout)
+	}
+}
