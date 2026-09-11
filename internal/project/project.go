@@ -32,6 +32,8 @@ type Project struct {
 	RepoPath     string    `json:"repo_path"`
 	Branch       string    `json:"branch"`
 	CanonicalSHA string    `json:"canonical_sha"`
+	TestCommand  string    `json:"test_command,omitempty"`
+	Standards    string    `json:"standards,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

@@ -70,20 +70,21 @@ func (p *PGRepo) SaveProject(ctx context.Context, pr project.Project) error {
 		return err
 	}
 	_, err = p.db.ExecContext(ctx, `
-INSERT INTO projects(id, org_id, name, repo_path, branch, canonical_sha, created_at)
-VALUES($1,$2,$3,$4,$5,$6,$7)
+INSERT INTO projects(id, org_id, name, repo_path, branch, canonical_sha, test_command, standards, created_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
 ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, repo_path=EXCLUDED.repo_path,
-branch=EXCLUDED.branch, canonical_sha=EXCLUDED.canonical_sha`,
-		pr.ID, org, pr.Name, pr.RepoPath, pr.Branch, pr.CanonicalSHA, pr.CreatedAt)
+branch=EXCLUDED.branch, canonical_sha=EXCLUDED.canonical_sha,
+test_command=EXCLUDED.test_command, standards=EXCLUDED.standards`,
+		pr.ID, org, pr.Name, pr.RepoPath, pr.Branch, pr.CanonicalSHA, pr.TestCommand, pr.Standards, pr.CreatedAt)
 	return err
 }
 
 func (p *PGRepo) GetProject(ctx context.Context, id string) (project.Project, error) {
 	var pr project.Project
 	err := p.db.QueryRowContext(ctx, `
-SELECT id, org_id, name, repo_path, branch, canonical_sha, created_at
+SELECT id, org_id, name, repo_path, branch, canonical_sha, test_command, standards, created_at
 FROM projects WHERE id=$1`, id).Scan(
-		&pr.ID, &pr.OrgID, &pr.Name, &pr.RepoPath, &pr.Branch, &pr.CanonicalSHA, &pr.CreatedAt)
+		&pr.ID, &pr.OrgID, &pr.Name, &pr.RepoPath, &pr.Branch, &pr.CanonicalSHA, &pr.TestCommand, &pr.Standards, &pr.CreatedAt)
 	if err == sql.ErrNoRows {
 		return project.Project{}, fmt.Errorf("unknown project %s", id)
 	}
@@ -395,7 +396,7 @@ FROM events WHERE ($1='' OR project_id=NULLIF($1,'')::uuid) ORDER BY at DESC LIM
 }
 
 func (p *PGRepo) ListProjects(ctx context.Context) ([]project.Project, error) {
-	rows, err := p.db.QueryContext(ctx, `SELECT id, org_id, name, repo_path, branch, canonical_sha, created_at FROM projects ORDER BY created_at`)
+	rows, err := p.db.QueryContext(ctx, `SELECT id, org_id, name, repo_path, branch, canonical_sha, test_command, standards, created_at FROM projects ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +404,7 @@ func (p *PGRepo) ListProjects(ctx context.Context) ([]project.Project, error) {
 	out := []project.Project{}
 	for rows.Next() {
 		var pr project.Project
-		if err := rows.Scan(&pr.ID, &pr.OrgID, &pr.Name, &pr.RepoPath, &pr.Branch, &pr.CanonicalSHA, &pr.CreatedAt); err != nil {
+		if err := rows.Scan(&pr.ID, &pr.OrgID, &pr.Name, &pr.RepoPath, &pr.Branch, &pr.CanonicalSHA, &pr.TestCommand, &pr.Standards, &pr.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, pr)

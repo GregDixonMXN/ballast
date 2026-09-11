@@ -45,6 +45,7 @@ type Server struct {
 type ProjectService interface {
 	List() ([]project.Project, error)
 	Create(name, repo, branch string) (any, error)
+	CreateWithSpec(name, repo, branch, testCommand, standards string) (any, error)
 	Get(id string) (any, error)
 	Head(id string) (string, error)
 	SetHead(id, sha string) error

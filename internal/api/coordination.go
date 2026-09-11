@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"ballast/internal/project"
 	"ballast/internal/workspace"
 )
 
@@ -105,6 +106,13 @@ func (s *Server) workspaceRecord(id string) (workspace.Workspace, error) {
 // never eats the context it is trying to protect.
 func (s *Server) promptContext(projectID, excludeOwner string) string {
 	var b strings.Builder
+	if s.Projects != nil {
+		if raw, err := s.Projects.Get(projectID); err == nil {
+			if pr, ok := raw.(project.Project); ok && pr.Standards != "" {
+				b.WriteString("CODING STANDARDS (hold every change to these):\n" + pr.Standards + "\n")
+			}
+		}
+	}
 	if s.Leases != nil {
 		var sibs []string
 		for _, l := range s.Leases.Active(projectID) {

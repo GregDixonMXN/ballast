@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -48,6 +49,12 @@ type Projects struct {
 }
 
 func (s *Projects) Create(name, repo, branch string) (any, error) {
+	return s.CreateWithSpec(name, repo, branch, "", "")
+}
+
+// CreateWithSpec creates a project with its test gate and coding
+// standards. Empty testCommand is auto-detected from the repo stack.
+func (s *Projects) CreateWithSpec(name, repo, branch, testCommand, standards string) (any, error) {
 	ctx := context.Background()
 	if name == "" || repo == "" {
 		return nil, fmt.Errorf("name and repo required")
@@ -72,10 +79,54 @@ func (s *Projects) Create(name, repo, branch string) (any, error) {
 	}
 	p := project.NewProject("", name, repo, branch)
 	p.CanonicalSHA = head
+	p.TestCommand = testCommand
+	if p.TestCommand == "" {
+		p.TestCommand = detectTestCommand(repo)
+	}
+	p.Standards = standards
+	if p.Standards == "" {
+		p.Standards = detectStandards(repo)
+	}
 	if err := s.Repo.SaveProject(ctx, p); err != nil {
 		return nil, err
 	}
 	return p, nil
+}
+
+// detectTestCommand guesses the test gate from the repo stack.
+func detectTestCommand(repo string) string {
+	has := func(f string) bool {
+		_, err := os.Stat(filepath.Join(repo, f))
+		return err == nil
+	}
+	switch {
+	case has("Cargo.toml"):
+		return "cargo test --workspace"
+	case has("go.mod"):
+		return "go test ./..."
+	case has("package.json"):
+		return "npm test"
+	case has("pytest.ini"), has("pyproject.toml"), has("setup.py"):
+		return "pytest"
+	case has("test.sh"):
+		return "./test.sh"
+	default:
+		return ""
+	}
+}
+
+// detectStandards reads repo-level standard files into the prompt.
+func detectStandards(repo string) string {
+	for _, f := range []string{".ballast/standards.md", "STANDARDS.md", "AGENTS.md", "CONTRIBUTING.md"} {
+		raw, err := os.ReadFile(filepath.Join(repo, f))
+		if err == nil && len(raw) > 0 {
+			if len(raw) > 4000 {
+				raw = raw[:4000]
+			}
+			return string(raw)
+		}
+	}
+	return ""
 }
 
 func (s *Projects) Get(id string) (any, error) {

@@ -13,9 +13,11 @@ import (
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name   string `json:"name"`
-		Repo   string `json:"repo"`
-		Branch string `json:"branch"`
+		Name        string `json:"name"`
+		Repo        string `json:"repo"`
+		Branch      string `json:"branch"`
+		TestCommand string `json:"test_command"`
+		Standards   string `json:"standards"`
 	}
 	if err := decodeJSON(r, &in); err != nil || in.Name == "" || in.Repo == "" {
 		writeJSON(w, 400, map[string]string{"error": "name and repo required"})
@@ -28,7 +30,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 501, map[string]string{"error": "project service not wired"})
 		return
 	}
-	p, err := s.Projects.Create(in.Name, in.Repo, in.Branch)
+	p, err := s.Projects.CreateWithSpec(in.Name, in.Repo, in.Branch, in.TestCommand, in.Standards)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

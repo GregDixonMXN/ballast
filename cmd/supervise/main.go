@@ -99,6 +99,16 @@ func main() {
 		os.Exit(2)
 	}
 	c := &client{base: *server, tok: strings.TrimSpace(string(raw)), hc: &http.Client{Timeout: 60 * time.Second}}
+	// Project spec: test gate defaults from the project so supervision
+	// adapts to any stack (cargo, go, npm, pytest, test.sh).
+	if *testCmd == "" {
+		if pv, err := c.call("GET", "/projects/"+*project, nil); err == nil {
+			if pm, ok := pv.(map[string]any); ok {
+				*testCmd, _ = pm["test_command"].(string)
+			}
+		}
+	}
+	fmt.Println("test-command:", *testCmd)
 
 	for round := 1; ; round++ {
 		done, err := superviseRound(c)
