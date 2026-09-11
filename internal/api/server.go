@@ -174,7 +174,13 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			wsRoute := strings.HasPrefix(r.URL.Path, "/workspaces/") &&
 				(strings.HasSuffix(r.URL.Path, "/status") || strings.HasSuffix(r.URL.Path, "/claim"))
 			notesRoute := strings.Contains(r.URL.Path, "/notes")
-			if !ownRoute && !wsRoute && !notesRoute {
+			// Foreman reads: a runner may list project state (tasks,
+			// workspaces, changesets) to supervise siblings. Reads only;
+			// mutations stay gated above.
+			readRoute := r.Method == "GET" && (strings.Contains(r.URL.Path, "/tasks") ||
+				strings.Contains(r.URL.Path, "/workspaces") ||
+				strings.Contains(r.URL.Path, "/changesets"))
+			if !ownRoute && !wsRoute && !notesRoute && !readRoute {
 				writeJSON(w, 403, map[string]string{"error": "operator capability required"})
 				return
 			}

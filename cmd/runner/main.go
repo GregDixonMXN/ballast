@@ -135,6 +135,12 @@ func main() {
 	}
 	cli.Token = runnerTok // run on the scoped runner token from here on
 	log.Printf("runner %s (%s/%s) registered", id, runtime.GOOS, runtime.GOARCH)
+	// Child agents inherit a scoped API credential: they can read
+	// project state, claim scopes, and post notes — never integrate,
+	// delete, or read other runners' routes.
+	_ = os.Setenv("BALLAST_API", *server)
+	_ = os.Setenv("BALLAST_RUNNER_TOKEN", runnerTok)
+	_ = os.Setenv("BALLAST_RUNNER_ID", id)
 
 	ex := &runner.Executor{Client: cli, Adapters: adapters, WorktreeRoot: *root, Timeout: *timeout}
 
