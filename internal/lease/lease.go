@@ -29,6 +29,9 @@ type Manager struct {
 	ls []Scope
 }
 
+// New returns an empty manager.
+func New() *Manager { return &Manager{} }
+
 // Acquire records a claim and returns overlapping active claims owned by others.
 func (m *Manager) Acquire(projectID, ownerID, pattern string) (Scope, []Scope) {
 	m.mu.Lock()
@@ -56,6 +59,23 @@ func (m *Manager) Release(ownerID string) {
 			m.ls[i].Active = false
 		}
 	}
+}
+
+// Active lists active leases, optionally filtered to one project.
+func (m *Manager) Active(projectID string) []Scope {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Scope
+	for _, s := range m.ls {
+		if !s.Active {
+			continue
+		}
+		if projectID != "" && s.ProjectID != projectID {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // Overlaps reports whether two path patterns can cover the same file.

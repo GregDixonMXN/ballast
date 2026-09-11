@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// LoopConfig bounds the run. Zero MaxTurns defaults to 40.
+// LoopConfig bounds the run. Zero MaxTurns defaults to 60.
 type LoopConfig struct {
 	Model    Config
 	Gate     Gate
@@ -21,6 +21,12 @@ type LoopConfig struct {
 	// OnTurn receives a one-line human summary after every model/tool
 	// turn. May be nil. Used for progress visibility while the run lives.
 	OnTurn func(summary string)
+	// Coordination hooks (all optional). Board seeds the run with the
+	// project blackboard; Note posts to it; Claim announces a write
+	// scope and returns overlapping holders as "pattern (owner)" lines.
+	Board func() []string
+	Note  func(text string) error
+	Claim func(pattern string) []string
 }
 
 // LoopAdapter implements agent.Adapter by driving the model directly:
@@ -31,6 +37,10 @@ type LoopConfig struct {
 type LoopAdapter struct {
 	name string
 	cfg  LoopConfig
+	mu   sync.Mutex
+	// work scope, set via SetWork when the runner provides it.
+	wsID      string
+	projectID string
 }
 
 func NewLoop(name string, cfg LoopConfig) *LoopAdapter {
@@ -46,6 +56,33 @@ func NewLoop(name string, cfg LoopConfig) *LoopAdapter {
 func (l *LoopAdapter) Name() string { return l.name }
 
 func (l *LoopAdapter) Available(_ context.Context) bool { return true }
+
+// SetWork binds the run to its workspace/project for coordination
+// (claims, notes). Called by the executor when supported; the loop
+// works without it.
+func (l *LoopAdapter) SetWork(wsID, projectID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.wsID = wsID
+	l.projectID = projectID
+}
+
+// Scope returns the bound workspace/project, or empty strings.
+func (l *LoopAdapter) Scope() (wsID, projectID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.wsID, l.projectID
+}
+
+// SetHooks attaches coordination callbacks after construction (the
+// runner builds the adapter before its API client exists).
+func (l *LoopAdapter) SetHooks(board func() []string, note func(string) error, claim func(string) []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.Board = board
+	l.cfg.Note = note
+	l.cfg.Claim = claim
+}
 
 func (l *LoopAdapter) SendMessage(_ context.Context, _, _ string) error {
 	return fmt.Errorf("streaming input not supported; start a new task turn")
@@ -91,9 +128,21 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 
 	client := NewClient(l.cfg.Model)
 	reg := NewRegistry(l.cfg.Gate)
+	reg.OnNote = l.cfg.Note
+	reg.OnClaim = l.cfg.Claim
+	userContent := prompt
+	if l.cfg.Board != nil {
+		if lines := l.cfg.Board(); len(lines) > 0 {
+			if len(lines) > 6 {
+				lines = lines[:6]
+			}
+			userContent = "PROJECT BOARD (what siblings learned before you):\n- " +
+				strings.Join(lines, "\n- ") + "\n\n" + prompt
+		}
+	}
 	msgs := []chatMessage{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: prompt},
+		{Role: "user", Content: userContent},
 	}
 	tools := reg.ChatTools()
 	turn("turn 0: task received (%d chars), %d tools available", len(prompt), len(tools))

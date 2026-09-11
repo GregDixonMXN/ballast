@@ -15,6 +15,8 @@ import (
 	"ballast/internal/auth"
 	"ballast/internal/changeset"
 	"ballast/internal/events"
+	"ballast/internal/lease"
+	"ballast/internal/notes"
 	"ballast/internal/telemetry"
 )
 
@@ -33,6 +35,11 @@ type Server struct {
 	Tasks      TaskService
 	Workspaces WorkspaceService
 	Changesets ChangesetService
+	// Coordination primitives live in memory on the server: leases are
+	// cooperative scope claims, notes are the project blackboard. Both
+	// are advisory — the changeset conflict check stays authoritative.
+	Leases *lease.Manager
+	Notes  *notes.Board
 }
 
 type ProjectService interface {
@@ -71,7 +78,7 @@ type ChangesetService interface {
 func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s := &Server{mux: http.NewServeMux(), bus: bus, auth: toks,
 		perms: auth.LocalAuthorizer{}, count: telemetry.NewCounters(),
-		dispatch: NewDispatch()}
+		dispatch: NewDispatch(), Leases: lease.New(), Notes: notes.New()}
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /readyz", s.health)
 	s.mux.HandleFunc("GET /metrics", s.requireAuth(s.metrics))
@@ -103,6 +110,9 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s.mux.HandleFunc("POST /runners/{id}/results", s.requireAuth(s.reportResults))
 	s.mux.HandleFunc("POST /tasks/{id}/assign", s.requireAuth(s.assignTask))
 	s.mux.HandleFunc("POST /workspaces/{id}/status", s.requireAuth(s.setWorkspaceStatus))
+	s.mux.HandleFunc("POST /workspaces/{id}/claim", s.requireAuth(s.claimScope))
+	s.mux.HandleFunc("GET /projects/{id}/notes", s.requireAuth(s.listNotes))
+	s.mux.HandleFunc("POST /projects/{id}/notes", s.requireAuth(s.postNote))
 	return s
 }
 
@@ -161,13 +171,19 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if ident.Kind == "runner" {
 			ownRoute := strings.HasPrefix(r.URL.Path, "/runners/"+ident.ID+"/")
-			statusRoute := strings.HasPrefix(r.URL.Path, "/workspaces/") && strings.HasSuffix(r.URL.Path, "/status")
-			if !ownRoute && !statusRoute {
+			wsRoute := strings.HasPrefix(r.URL.Path, "/workspaces/") &&
+				(strings.HasSuffix(r.URL.Path, "/status") || strings.HasSuffix(r.URL.Path, "/claim"))
+			notesRoute := strings.Contains(r.URL.Path, "/notes")
+			if !ownRoute && !wsRoute && !notesRoute {
 				writeJSON(w, 403, map[string]string{"error": "operator capability required"})
 				return
 			}
-			if statusRoute && !s.dispatch.Owns(ident.ID, r.PathValue("id")) {
+			if wsRoute && !s.dispatch.Owns(ident.ID, r.PathValue("id")) {
 				writeJSON(w, 403, map[string]string{"error": "workspace not assigned to runner"})
+				return
+			}
+			if notesRoute && !s.dispatch.OwnsProject(ident.ID, r.PathValue("id")) {
+				writeJSON(w, 403, map[string]string{"error": "no assigned work in project"})
 				return
 			}
 		} else if r.Method != "GET" && !s.perms.Can(r.Context(), ident, "", "write") {

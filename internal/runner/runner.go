@@ -112,6 +112,64 @@ func (c *Client) Report(runnerID string, res api.WorkResult) (map[string]any, er
 	return out, err
 }
 
+// coordinationNote mirrors the server board shape.
+type coordinationNote struct {
+	Author string `json:"author"`
+	Text   string `json:"text"`
+}
+
+// Claim announces a write scope for a workspace; returns overlapping
+// holders as "pattern (owner)" lines. Empty means no overlap.
+func (c *Client) Claim(wsID, pattern string) []string {
+	var out struct {
+		Overlaps []map[string]string `json:"overlaps"`
+	}
+	if _, err := c.do("POST", "/workspaces/"+wsID+"/claim", map[string]string{"pattern": pattern}, &out); err != nil {
+		return nil
+	}
+	var lines []string
+	for _, o := range out.Overlaps {
+		lines = append(lines, o["pattern"]+" ("+o["owner"]+")")
+	}
+	return lines
+}
+
+// PostNote appends to the project blackboard as this workspace.
+func (c *Client) PostNote(projectID, wsID, text string) error {
+	var out map[string]any
+	_, err := c.do("POST", "/projects/"+projectID+"/notes",
+		map[string]string{"text": text, "workspace_id": wsID}, &out)
+	return err
+}
+
+// Board reads the project blackboard newest-first, capped for prompts.
+func (c *Client) Board(projectID string) []string {
+	var list []coordinationNote
+	if _, err := c.do("GET", "/projects/"+projectID+"/notes", nil, &list); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for i, n := range list {
+		if i >= 6 {
+			break
+		}
+		owner := n.Author
+		if len(owner) > 8 {
+			owner = owner[:8]
+		}
+		out = append(out, "["+owner+"] "+oneLineNote(n.Text))
+	}
+	return out
+}
+
+func oneLineNote(s string) string {
+	s = strings.ReplaceAll(s, "\n", " | ")
+	if len(s) > 220 {
+		return s[:220] + "..."
+	}
+	return s
+}
+
 // runTest executes an argv-style test command inside dir and captures it.
 func runTest(ctx context.Context, dir, command string) (exit int, output string) {
 	parts := strings.Fields(command)
@@ -234,6 +292,11 @@ func (e *Executor) RunOnce(ctx context.Context, runnerID string, poll func() (ap
 	}
 	if err := e.Client.SetStatus(item.WorkspaceID, "RUNNING"); err != nil {
 		return true, fmt.Errorf("mark running: %w", err)
+	}
+	// Context-aware adapters (the tool loop) learn their workspace and
+	// project so coordination hooks can claim scopes and read the board.
+	if ca, ok := a.(interface{ SetWork(wsID, projectID string) }); ok {
+		ca.SetWork(item.WorkspaceID, item.ProjectID)
 	}
 	ex, err := a.StartTask(ctx, item.TaskID, item.Path, item.Prompt)
 	res := api.WorkResult{WorkspaceID: item.WorkspaceID}

@@ -8,6 +8,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -166,6 +167,7 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 		Adapter     string `json:"adapter"`
 		Prompt      string `json:"prompt"`
 		TestCommand string `json:"test_command"`
+		Scope       string `json:"scope"`
 	}
 	if err := decodeJSON(r, &in); err != nil || in.RunnerID == "" {
 		writeJSON(w, 400, map[string]string{"error": "runner_id required"})
@@ -211,6 +213,16 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 	prompt := in.Prompt
 	if prompt == "" {
 		prompt = "## " + t.Title + "\n" + t.Description
+	}
+	// Cooperative scope: claim the assignment upfront and show the agent
+	// what siblings hold, plus the project board. Advisory — the
+	// changeset conflict check stays authoritative.
+	if s.Leases != nil && strings.TrimSpace(in.Scope) != "" {
+		_, overlaps := s.Leases.Acquire(t.ProjectID, ws.ID, strings.TrimSpace(in.Scope))
+		_ = overlaps
+	}
+	if ctx := s.promptContext(t.ProjectID, ws.ID); ctx != "" {
+		prompt = ctx + "\n" + prompt
 	}
 	item := WorkItem{WorkspaceID: ws.ID, ProjectID: t.ProjectID, TaskID: t.ID,
 		Title: t.Title, Description: t.Description, Prompt: prompt,
@@ -284,6 +296,10 @@ func (s *Server) reportResults(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	// Claims die with the run: a finished workspace holds no scope.
+	if s.Leases != nil {
+		s.Leases.Release(ws.ID)
+	}
 	_ = s.bus.Publish(r.Context(), events.New(ws.ProjectID, events.ActorAgent, "",
 		events.AgentStopped, ws.ID, map[string]any{"exit": in.ExitCode}))
 	if in.TestRan {
@@ -345,6 +361,21 @@ func (d *Dispatch) Owns(runnerID, workspaceID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.owners[workspaceID] == runnerID
+}
+
+// OwnsProject reports whether the runner holds any work item in the project.
+func (d *Dispatch) OwnsProject(runnerID, projectID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for wsID, owner := range d.owners {
+		if owner != runnerID {
+			continue
+		}
+		if item, ok := d.items[wsID]; ok && item.ProjectID == projectID {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Dispatch) List() []RunnerInfo {

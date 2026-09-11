@@ -63,18 +63,6 @@ func main() {
 	if *agentBin != "" {
 		adapters = append(adapters, agent.NewShell("custom", *agentBin, nil))
 	}
-	if *modelKeyFile != "" {
-		key, err := readAPIKeyFile(*modelKeyFile)
-		if err != nil {
-			log.Fatalf("model key: %v", err)
-		}
-		adapters = append(adapters, agentloop.NewLoop("loop", agentloop.LoopConfig{
-			Model: agentloop.Config{BaseURL: *modelBaseURL, APIKey: key, Model: *modelName},
-			OnTurn: func(s string) {
-				log.Printf("loop: %s", s)
-			},
-		}))
-	}
 	if *agentHome != "" {
 		absolute, err := filepath.Abs(*agentHome)
 		if err != nil {
@@ -98,7 +86,45 @@ func main() {
 			capabilities = append(capabilities, adapter.Name())
 		}
 	}
+	if *modelKeyFile != "" {
+		key, err := readAPIKeyFile(*modelKeyFile)
+		if err != nil {
+			log.Fatalf("model key: %v", err)
+		}
+		adapters = append(adapters, agentloop.NewLoop("loop", agentloop.LoopConfig{
+			Model: agentloop.Config{BaseURL: *modelBaseURL, APIKey: key, Model: *modelName},
+			OnTurn: func(s string) {
+				log.Printf("loop: %s", s)
+			},
+		}))
+	}
 	cli := &runner.Client{Base: *server, Token: token}
+	for _, adapter := range adapters {
+		if loopAd, ok := adapter.(*agentloop.LoopAdapter); ok {
+			loopAd := loopAd
+			loopAd.SetHooks(
+				func() []string {
+					if _, project := loopAd.Scope(); project != "" {
+						return cli.Board(project)
+					}
+					return nil
+				},
+				func(text string) error {
+					ws, project := loopAd.Scope()
+					if ws == "" || project == "" {
+						return fmt.Errorf("no bound work")
+					}
+					return cli.PostNote(project, ws, text)
+				},
+				func(pattern string) []string {
+					if ws, _ := loopAd.Scope(); ws != "" {
+						return cli.Claim(ws, pattern)
+					}
+					return nil
+				},
+			)
+		}
+	}
 	id, runnerTok, err := cli.Register(api.RunnerInfo{
 		Hostname: host, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Capabilities: capabilities,

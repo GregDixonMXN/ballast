@@ -32,6 +32,11 @@ type definition struct {
 type Registry struct {
 	tools map[string]definition
 	gate  Gate
+	// Coordination hooks, set by the loop. OnNote posts to the project
+	// board; OnClaim announces a write scope and returns overlapping
+	// holders. Both optional.
+	OnNote  func(text string) error
+	OnClaim func(pattern string) []string
 }
 
 func NewRegistry(gate Gate) *Registry {
@@ -146,6 +151,21 @@ func NewRegistry(gate Gate) *Registry {
 			}
 			return string(out), nil
 		})
+	r.add("note", "Post a short message to the project blackboard for sibling agents (discoveries, warnings, conventions). Keep it under a paragraph.",
+		obj(map[string]any{"text": str("Message for sibling agents")}, "text"),
+		func(ctx context.Context, wd string, args map[string]any) (string, error) {
+			if r.OnNote == nil {
+				return "", fmt.Errorf("blackboard unavailable in this run")
+			}
+			text := strings.TrimSpace(stringArg(args, "text"))
+			if text == "" {
+				return "", fmt.Errorf("empty note")
+			}
+			if err := r.OnNote(text); err != nil {
+				return "", err
+			}
+			return "noted", nil
+		})
 	return r
 }
 
@@ -165,7 +185,23 @@ func (r *Registry) Execute(ctx context.Context, workdir, name string, args map[s
 			return "", fmt.Errorf("gate denied %s: %w", name, err)
 		}
 	}
-	return d.Fn(ctx, workdir, args)
+	result, err := d.Fn(ctx, workdir, args)
+	if err != nil {
+		return result, err
+	}
+	// Claim-on-write: announce mutating paths so siblings see the
+	// overlap live. Advisory — overlaps warn inside the result, they
+	// never block the write.
+	if r.OnClaim != nil && (name == "write_file" || name == "edit_file") {
+		if p, cerr := resolve(workdir, stringArg(args, "path")); cerr == nil {
+			if rel, rerr := filepath.Rel(workdir, p); rerr == nil {
+				for _, o := range r.OnClaim(rel) {
+					result += "\n[coordination] sibling also holds this scope: " + o
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 // ChatTools renders definitions in OpenAI function-tool format.
