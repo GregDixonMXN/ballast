@@ -127,11 +127,16 @@ func (o *Overseer) Sweep(projectID string, tasks []TaskView, workspaces []WSView
 		}
 		running[w.TaskID] = append(running[w.TaskID], w)
 	}
-	// 1. Duplicate open tasks by title similarity.
+	// 1. Duplicate open tasks by title similarity, plus open tasks
+	// duplicating already-DONE work (rework risk).
 	open := []TaskView{}
+	var done []TaskView
 	for _, t := range tasks {
-		if t.Status == "TODO" || t.Status == "RUNNING" || t.Status == "REVIEW" || t.Status == "BLOCKED" {
+		switch t.Status {
+		case "TODO", "RUNNING", "REVIEW", "BLOCKED":
 			open = append(open, t)
+		case "DONE":
+			done = append(done, t)
 		}
 	}
 	for i := 0; i < len(open); i++ {
@@ -140,6 +145,14 @@ func (o *Overseer) Sweep(projectID string, tasks []TaskView, workspaces []WSView
 				if o.once("dup:"+pairKey(open[i].ID, open[j].ID), 24*time.Hour) {
 					out = append(out, "duplicate tasks: "+short(open[i].ID)+" and "+short(open[j].ID)+
 						" share a title ("+open[i].Title+") — one should be deleted")
+				}
+			}
+		}
+		for _, d := range done {
+			if similar(open[i].Title, d.Title) {
+				if o.once("rework:"+open[i].ID+">"+d.ID, 24*time.Hour) {
+					out = append(out, "rework risk: open task "+short(open[i].ID)+
+						" ("+open[i].Title+") duplicates DONE work in "+short(d.ID))
 				}
 			}
 		}
