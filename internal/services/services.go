@@ -133,6 +133,26 @@ func (s *Projects) Get(id string) (any, error) {
 	return s.Repo.GetProject(context.Background(), id)
 }
 
+// UpdateSpec sets the test gate and coding standards. Empty values
+// leave the existing ones untouched.
+func (s *Projects) UpdateSpec(id, testCommand, standards string) (any, error) {
+	ctx := context.Background()
+	p, err := s.Repo.GetProject(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if testCommand != "" {
+		p.TestCommand = testCommand
+	}
+	if standards != "" {
+		p.Standards = standards
+	}
+	if err := s.Repo.SaveProject(ctx, p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 func (s *Projects) Head(id string) (string, error) {
 	ctx := context.Background()
 	p, err := s.Repo.GetProject(ctx, id)

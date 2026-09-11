@@ -53,6 +53,28 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, p)
 }
 
+// updateProject sets the test gate and coding standards on a project.
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TestCommand string `json:"test_command"`
+		Standards   string `json:"standards"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	if s.Projects == nil {
+		writeJSON(w, 501, map[string]string{"error": "project service not wired"})
+		return
+	}
+	p, err := s.Projects.UpdateSpec(r.PathValue("id"), in.TestCommand, in.Standards)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, p)
+}
+
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Title       string   `json:"title"`

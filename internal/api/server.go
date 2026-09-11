@@ -47,6 +47,7 @@ type ProjectService interface {
 	Create(name, repo, branch string) (any, error)
 	CreateWithSpec(name, repo, branch, testCommand, standards string) (any, error)
 	Get(id string) (any, error)
+	UpdateSpec(id, testCommand, standards string) (any, error)
 	Head(id string) (string, error)
 	SetHead(id, sha string) error
 }
@@ -93,6 +94,7 @@ func New(bus events.Bus, toks *auth.Tokens) *Server {
 	s.mux.HandleFunc("GET /events", s.requireAuth(s.stream)) // ?project=
 	s.mux.HandleFunc("POST /projects", s.requireAuth(s.createProject))
 	s.mux.HandleFunc("GET /projects/{id}", s.requireAuth(s.getProject))
+	s.mux.HandleFunc("PATCH /projects/{id}", s.requireAuth(s.updateProject))
 	s.mux.HandleFunc("POST /projects/{id}/tasks", s.requireAuth(s.createTask))
 	s.mux.HandleFunc("GET /projects/{id}/tasks", s.requireAuth(s.listTasks))
 	s.mux.HandleFunc("GET /projects/{id}/ready", s.requireAuth(s.readyTasks))
