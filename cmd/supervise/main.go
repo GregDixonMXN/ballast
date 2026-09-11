@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 )
@@ -80,8 +81,11 @@ func arr(v any) []map[string]any {
 	return out
 }
 
-func str(m map[string]any, k string) string   { s, _ := m[k].(string); return s }
-func fnum(m map[string]any, k string) float64 { f, _ := m[k].(float64); return f }
+func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
+
+// escalated remembers changesets already raised to a human so the
+// board gets each exception once instead of every round.
+var escalated = map[string]bool{}
 
 func main() {
 	flag.Parse()
@@ -199,13 +203,14 @@ func superviseRound(c *client) (bool, error) {
 func reviewChangeset(c *client, cs map[string]any, wsByTask map[string]map[string]any) {
 	csid := str(cs, "id")
 	tid := str(cs, "task_id")
-	w := wsByTask[tid]
-	testExit, hasTest := fnum(w, "last_test_exit"), false
-	if w != nil {
-		_, hasTest = w["last_test_exit"]
+	if escalated[csid] {
+		return
 	}
-	_ = testExit
-	// single-scope check: at most one non-manifest top-two-level dir
+	w := wsByTask[tid]
+	// single-scope check: at most one directory besides manifests.
+	// COMPLETED is the test evidence: the server only marks COMPLETED
+	// when the exit code is 0 and a required test result is present
+	// and green (zero exits serialize as absent via omitempty).
 	diff, _ := cs["diff"].(string)
 	scopes := map[string]bool{}
 	for _, l := range strings.Split(diff, "\n") {
@@ -216,15 +221,10 @@ func reviewChangeset(c *client, cs map[string]any, wsByTask map[string]map[strin
 		if f == "Cargo.toml" || f == "Cargo.lock" {
 			continue
 		}
-		parts := strings.SplitN(f, "/", 3)
-		dir := f
-		if len(parts) >= 2 {
-			dir = parts[0] + "/" + parts[1]
-		}
-		scopes[dir] = true
+		scopes[path.Dir(f)] = true
 	}
 	singleScope := len(scopes) <= 1
-	green := hasTest && fnum(w, "last_test_exit") == 0 && fnum(w, "last_exit") == 0
+	green := w != nil && str(w, "status") == "COMPLETED"
 	if !green || !singleScope {
 		reason := []string{}
 		if !green {
@@ -237,6 +237,7 @@ func reviewChangeset(c *client, cs map[string]any, wsByTask map[string]map[strin
 			"author": "supervisor",
 			"text":   "escalate: changeset " + csid[:8] + " (task " + tid[:8] + ") needs human: " + strings.Join(reason, "; "),
 		})
+		escalated[csid] = true
 		fmt.Println("escalate", csid[:8], strings.Join(reason, "; "))
 		return
 	}
@@ -255,6 +256,7 @@ func reviewChangeset(c *client, cs map[string]any, wsByTask map[string]map[strin
 			"author": "supervisor",
 			"text":   "escalate: changeset " + csid[:8] + " approved but CONFLICTED on integrate — human merge needed",
 		})
+		escalated[csid] = true
 		fmt.Println("integrate", csid[:8], "CONFLICTED, escalated")
 		return
 	}
