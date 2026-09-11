@@ -7,7 +7,9 @@
 //     single-scope + conflict-free integrates automatically;
 //     anything else escalates to a human via the project board.
 //  3. Requeue failed work (test red) as TODO with a note.
-//  4. Exit 0 when no TODO/RUNNING/REVIEW/BLOCKED task remains.
+//  4. Exit 0 when no TODO/RUNNING/REVIEW/BLOCKED task remains — or,
+//     with -outline set, verify the drained repo against the outline
+//     first and create capped follow-up tasks for any gaps.
 //
 // Escalation boundary: the loop never force-merges a conflict, never
 // approves a red gate, never deletes. Humans handle exceptions.
@@ -22,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 	"time"
@@ -37,6 +40,8 @@ var (
 	testCmd      = flag.String("test-command", "", "test gate command")
 	interval     = flag.Duration("interval", 60*time.Second, "poll interval")
 	maxRounds    = flag.Int("rounds", 0, "max rounds (0 = until complete)")
+	outline      = flag.String("outline", "", "outline .md for done-verification: when all tasks drain, the verifier checks the repo against this outline and creates follow-up tasks instead of exiting (empty = exit when drained, legacy behavior)")
+	maxFollowups = flag.Int("max-followups", 5, "cap on verifier-created follow-up tasks (0 = no follow-ups)")
 	planFile     = flag.String("plan", "", "outline .md file: plan tasks then exit")
 	modelBase    = flag.String("model-base-url", "https://api.meta.ai/v1", "model endpoint for --plan")
 	modelKeyFile = flag.String("model-key-file", "", "model API key file for --plan")
@@ -130,6 +135,16 @@ func main() {
 		if err != nil {
 			fmt.Println("round", round, "error:", err)
 		} else if done {
+			if *outline != "" && followupsUsed < *maxFollowups {
+				more, verr := verifyAndFollowUp(c)
+				if verr != nil {
+					fmt.Println("verifier error:", verr)
+				}
+				if more {
+					time.Sleep(*interval)
+					continue
+				}
+			}
 			fmt.Println("project complete")
 			c.call("POST", "/projects/"+*project+"/notes", map[string]any{
 				"text": "supervisor: all tasks DONE, project complete", "author": "supervisor",
@@ -352,6 +367,122 @@ func planProject(c *client) error {
 		"text":   fmt.Sprintf("planner: %d tasks from %s", len(tasks), *planFile),
 	})
 	return nil
+}
+
+// followupsUsed counts verifier-created tasks this run; capped by
+// -max-followups so a gap the agents can't close escalates instead of
+// looping forever.
+var followupsUsed = 0
+
+const verifierSystem = `You verify a finished project against its outline and propose follow-up work. Reply with a single JSON object and nothing else: {"satisfied": bool, "followups": [{"title": string, "description": string (concrete steps + acceptance), "scopes": [repo-relative path prefixes], "depends_on": [0-based indexes into the numbered task list below], "gate": string (SELF-CONTAINED check, never the project-wide suite unless it is the final task)}]}. Rules: satisfied=true only if every outline item is demonstrably done AND the project gate is green; gate output tail is included — a red gate means satisfied=false with at least one follow-up to fix it. Keep follow-ups small and scoped (one per gap); empty followups when satisfied.`
+
+// verifyAndFollowUp runs when the task list drains: it executes the
+// project gate in the repo, asks the model to judge the result against
+// the outline, and creates follow-up tasks for any gaps. It returns
+// true when new tasks were created (the loop continues).
+func verifyAndFollowUp(c *client) (bool, error) {
+	pv, err := c.call("GET", "/projects/"+*project, nil)
+	if err != nil {
+		return false, err
+	}
+	pm, _ := pv.(map[string]any)
+	repo, _ := pm["repo_path"].(string)
+	gate, _ := pm["test_command"].(string)
+	if gate == "" {
+		gate = *testCmd
+	}
+	outlineRaw, err := os.ReadFile(*outline)
+	if err != nil {
+		return false, err
+	}
+	tasksV, err := c.call("GET", "/projects/"+*project+"/tasks", nil)
+	if err != nil {
+		return false, err
+	}
+	tasks := arr(tasksV)
+	var tb strings.Builder
+	ids := make([]string, len(tasks))
+	for i, t := range tasks {
+		ids[i] = str(t, "id")
+		scopes, _ := t["scopes"].([]any)
+		ss := []string{}
+		for _, s := range scopes {
+			if s, ok := s.(string); ok {
+				ss = append(ss, s)
+			}
+		}
+		fmt.Fprintf(&tb, "%d. %s [%s] scopes=%s\n   %s\n", i, str(t, "title"), str(t, "status"), strings.Join(ss, ","), str(t, "description"))
+	}
+	gateOut := "(no project gate configured)"
+	if gate != "" && repo != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "sh", "-c", gate)
+		cmd.Dir = repo
+		raw, err := cmd.CombinedOutput()
+		tail := string(raw)
+		if len(tail) > 3000 {
+			tail = tail[len(tail)-3000:]
+		}
+		gateOut = fmt.Sprintf("command %q err=%v output tail:\n%s", gate, err, tail)
+	}
+	modelKey, err := readKey(*modelKeyFile)
+	if err != nil {
+		return false, fmt.Errorf("verifier needs -model-key-file: %w", err)
+	}
+	user := fmt.Sprintf("PROJECT: %s\nOUTLINE:\n%s\nTASKS:\n%s\nPROJECT GATE:\n%s",
+		pm["name"], string(outlineRaw), tb.String(), gateOut)
+	text, err := agentloop.Plan(context.Background(), agentloop.Config{
+		BaseURL: *modelBase, APIKey: modelKey, Model: *modelName,
+	}, verifierSystem, user)
+	if err != nil {
+		return false, err
+	}
+	var verdict struct {
+		Satisfied bool          `json:"satisfied"`
+		Followups []plannedTask `json:"followups"`
+	}
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start < 0 || end <= start || json.Unmarshal([]byte(text[start:end+1]), &verdict) != nil {
+		return false, fmt.Errorf("verifier returned bad JSON: %.300s", text)
+	}
+	if verdict.Satisfied || len(verdict.Followups) == 0 {
+		fmt.Println("verifier: satisfied, no follow-ups")
+		return false, nil
+	}
+	made := 0
+	for _, t := range verdict.Followups {
+		if followupsUsed+made >= *maxFollowups {
+			break
+		}
+		if t.Title == "" {
+			continue
+		}
+		deps := []string{}
+		for _, d := range t.Depends {
+			if d >= 0 && d < len(ids) && ids[d] != "" {
+				deps = append(deps, ids[d])
+			}
+		}
+		v, err := c.call("POST", "/projects/"+*project+"/tasks", map[string]any{
+			"title": t.Title, "description": t.Description,
+			"scopes": t.Scopes, "depends_on": deps, "test_command": t.Gate,
+		})
+		if err != nil {
+			fmt.Println("follow-up create FAILED:", t.Title, err)
+			continue
+		}
+		m, _ := v.(map[string]any)
+		made++
+		fmt.Printf("follow-up %s %s\n", str(m, "id")[:8], t.Title)
+	}
+	followupsUsed += made
+	c.call("POST", "/projects/"+*project+"/notes", map[string]any{
+		"author": "supervisor",
+		"text":   fmt.Sprintf("verifier: %d follow-up task(s) (%d/%d used)", made, followupsUsed, *maxFollowups),
+	})
+	return made > 0, nil
 }
 
 type plannedTask struct {
