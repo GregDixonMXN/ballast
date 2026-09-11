@@ -79,3 +79,6 @@ scheduler.
 No distribution license has been selected in this repository. Its owner must
 choose licensing terms before redistributing a public release. No license or
 commercial support entitlement is implied by the release-candidate label.
+
+## Suite
+Works alone. With Paldron (policy gate + sandbox) and Docket (one policy for both): https://github.com/GregDixonMXN/paldron, https://github.com/GregDixonMXN/docket

@@ -248,11 +248,12 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// isTransient reports failures worth retrying: network/timeout class.
-// API rejections (auth, schema, rate-limit wording) fail fast instead.
+// isTransient reports failures worth retrying: network/timeout class
+// plus rate limits (parallel fleets hit 429s; backoff absorbs them).
+// API rejections (auth, schema) fail fast instead.
 func isTransient(err error) bool {
 	msg := strings.ToLower(err.Error())
-	for _, k := range []string{"transport:", "timeout", "deadline exceeded", "connection reset", "connection refused", "temporary failure", "eof"} {
+	for _, k := range []string{"transport:", "timeout", "deadline exceeded", "connection reset", "connection refused", "temporary failure", "eof", "429", "rate limit", "too many requests", "overloaded", "try again"} {
 		if strings.Contains(msg, k) {
 			return true
 		}
