@@ -96,7 +96,25 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 		if err := ctx.Err(); err != nil {
 			return done(id, taskID, workspace, started, log.String(), "", 2, "cancelled: %v", err), nil
 		}
-		reply, err := client.Complete(ctx, msgs, tools)
+		// One slow API response must not kill a 20-turn run: retry
+		// transient transport failures, fail only on persistent errors.
+		var reply Reply
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			reply, err = client.Complete(ctx, msgs, tools)
+			if err == nil {
+				break
+			}
+			if !isTransient(err) || attempt == 3 {
+				break
+			}
+			turn("turn %d: model call attempt %d failed (%v), retrying", t, attempt, err)
+			select {
+			case <-ctx.Done():
+				return done(id, taskID, workspace, started, log.String(), "", 2, "cancelled: %v", ctx.Err()), nil
+			case <-time.After(time.Duration(attempt*5) * time.Second):
+			}
+		}
 		if err != nil {
 			return done(id, taskID, workspace, started, log.String(), "", 1, "model call failed on turn %d: %v", t, err), nil
 		}
@@ -174,4 +192,16 @@ func truncate(s string, n int) string {
 		return s[:n] + "..."
 	}
 	return s
+}
+
+// isTransient reports failures worth retrying: network/timeout class.
+// API rejections (auth, schema, rate-limit wording) fail fast instead.
+func isTransient(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, k := range []string{"transport:", "timeout", "deadline exceeded", "connection reset", "connection refused", "temporary failure", "eof"} {
+		if strings.Contains(msg, k) {
+			return true
+		}
+	}
+	return false
 }
