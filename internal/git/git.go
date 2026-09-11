@@ -14,6 +14,28 @@ import (
 	"strings"
 )
 
+// generatedJunk lists interpreter/build artifacts that must never enter
+// changesets. Agents routinely leave __pycache__ behind and a binary .pyc
+// once broke integrate with a CONFLICTED changeset. Excluded at the git
+// layer so every consumer (changeset Builds, workspace diffs, overlap
+// hunks) agrees on what counts as a change.
+var generatedJunk = []string{
+	":(exclude)__pycache__",
+	":(exclude)*.pyc",
+	":(exclude)*.pyo",
+	":(exclude).pytest_cache",
+}
+
+// withJunkExcluded appends the generated-junk exclude pathspecs to a
+// `git ... -- <paths>` argument list. Callers must already have “--“
+// and at least one positive pathspec (typically ".") in args.
+func withJunkExcluded(args []string) []string {
+	out := make([]string, 0, len(args)+len(generatedJunk))
+	out = append(out, args...)
+	out = append(out, generatedJunk...)
+	return out
+}
+
 // run executes git -C dir args... and returns trimmed stdout.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
 	out, err := runRaw(ctx, dir, args...)
@@ -123,16 +145,18 @@ func DiffBase(ctx context.Context, dir, base string) (string, error) {
 	if _, err = invoke("read-tree", base); err != nil {
 		return "", err
 	}
-	if _, err = invoke("add", "-A", "--", "."); err != nil {
+	addArgs := withJunkExcluded([]string{"add", "-A", "--", "."})
+	if _, err = invoke(addArgs...); err != nil {
 		return "", err
 	}
-	return invoke("diff", "--cached", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", base, "--", ".")
+	diffArgs := withJunkExcluded([]string{"diff", "--cached", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", base, "--", "."})
+	return invoke(diffArgs...)
 }
 
 // Hunks returns per-file changed line ranges vs base (for region overlap).
 // Uses `git diff -U0` headers: +++ b/<file> then @@ -a,b +c,d @@.
 func Hunks(ctx context.Context, dir, base string) (map[string][][2]int, error) {
-	out, err := run(ctx, dir, "diff", "-U0", base, "--", ".")
+	out, err := run(ctx, dir, withJunkExcluded([]string{"diff", "--no-ext-diff", "-U0", base, "--", "."})...)
 	if err != nil {
 		return nil, err
 	}
@@ -188,11 +212,11 @@ func TestMergeClean(ctx context.Context, repo, branch, head string) (bool, strin
 // ChangedBase includes changes committed by an agent as well as uncommitted
 // and untracked paths. NUL delimiters preserve whitespace in file names.
 func ChangedBase(ctx context.Context, dir, base string) ([]string, error) {
-	out, err := runRaw(ctx, dir, "diff", "--name-only", "-z", base, "--", ".")
+	out, err := runRaw(ctx, dir, withJunkExcluded([]string{"diff", "--name-only", "-z", base, "--", "."})...)
 	if err != nil {
 		return nil, err
 	}
-	un, err := runRaw(ctx, dir, "ls-files", "--others", "--exclude-standard", "-z")
+	un, err := runRaw(ctx, dir, withJunkExcluded([]string{"ls-files", "--others", "--exclude-standard", "-z", "--", "."})...)
 	if err != nil {
 		return nil, err
 	}
