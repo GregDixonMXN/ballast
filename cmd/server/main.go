@@ -17,6 +17,7 @@ import (
 	"ballast/internal/api"
 	"ballast/internal/auth"
 	"ballast/internal/events"
+	overseerPkg "ballast/internal/overseer"
 	"ballast/internal/services"
 	"ballast/internal/store"
 	"ballast/internal/telemetry"
@@ -83,6 +84,27 @@ func main() {
 	srv.Workspaces = &services.Workspaces{Repo: repo, Mgr: mgr}
 	srv.Changesets = &services.Changesets{Repo: repo}
 
+	// Overseer: structural supervision, harness-blind. Every minute it
+	// scans projects for duplicate tasks, file collisions across live
+	// workspaces, stuck runs, and overlapping claims, posting each new
+	// finding once to the project board. Advisory only.
+	projectsSvc := &services.Projects{Repo: repo}
+	tasksSvc := &services.Tasks{Repo: repo, Mgr: mgr}
+	wsSvc := &services.Workspaces{Repo: repo, Mgr: mgr}
+	overseer := overseerPkg.New()
+	go func() {
+		tick := time.NewTicker(60 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				sweepAll(ctx, projectsSvc, tasksSvc, wsSvc, srv, overseer)
+			}
+		}
+	}()
+
 	httpSrv := &http.Server{Addr: *addr, Handler: srv.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	log.Printf("ballast server on %s [%s] (pid %d)", *addr, mode, os.Getpid())
@@ -94,5 +116,45 @@ func main() {
 	}()
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+// sweepAll runs one overseer pass over every project: tasks, live
+// workspace files, and active claims feed the sweep; new findings land
+// on the project board. Errors are logged, never fatal: supervision
+// must not take down the control plane.
+func sweepAll(ctx context.Context, projects *services.Projects, tasks *services.Tasks, ws *services.Workspaces, srv *api.Server, o *overseerPkg.Overseer) {
+	_ = ctx
+	plist, err := projects.List()
+	if err != nil {
+		log.Printf("overseer: list projects: %v", err)
+		return
+	}
+	for _, p := range plist {
+		tasksAny, err := tasks.List(p.ID)
+		if err != nil {
+			continue
+		}
+		wsAny, err := ws.List(p.ID)
+		if err != nil {
+			continue
+		}
+		files := map[string][]string{}
+		for _, wv := range overseerPkg.AdaptWS(wsAny, nil) {
+			if wv.Status != "RUNNING" {
+				continue
+			}
+			if changed, err := ws.ChangedFiles(wv.ID); err == nil {
+				files[wv.ID] = changed
+			}
+		}
+		findings := o.Sweep(p.ID, overseerPkg.AdaptTasks(tasksAny), overseerPkg.AdaptWS(wsAny, files))
+		if srv.Leases != nil {
+			findings = append(findings, o.CheckClaims(srv.Leases.Active(p.ID))...)
+		}
+		for _, f := range findings {
+			log.Printf("overseer [%s]: %s", p.ID[:8], f)
+		}
+		overseerPkg.Post(srv.Notes, p.ID, findings)
 	}
 }

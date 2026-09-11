@@ -192,9 +192,9 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (id) DO UPDATE SET agent_id=EXCLUDED.agent_id, runner_id=EXCLUDED.runner_id,
 status=EXCLUDED.status, updated_at=EXCLUDED.updated_at, last_exit=EXCLUDED.last_exit,
 last_stdout=EXCLUDED.last_stdout, last_stderr=EXCLUDED.last_stderr, last_test_exit=EXCLUDED.last_test_exit`,
-	w.ID, w.ProjectID, w.TaskID, nullUUID(w.AgentID), nullUUID(w.RunnerID),
-	w.RepoPath, w.Base, w.Path, string(w.Status), w.CreatedAt, w.UpdatedAt,
-	w.LastExit, w.LastStdout, w.LastStderr, w.LastTest)
+		w.ID, w.ProjectID, w.TaskID, nullUUID(w.AgentID), nullUUID(w.RunnerID),
+		w.RepoPath, w.Base, w.Path, string(w.Status), w.CreatedAt, w.UpdatedAt,
+		w.LastExit, w.LastStdout, w.LastStderr, w.LastTest)
 	return err
 }
 
