@@ -54,6 +54,7 @@ type ProjectService interface {
 type TaskService interface {
 	Create(projectID, title, desc string, scopes []string) (any, error)
 	CreateWithDeps(projectID, title, desc string, scopes, depends []string) (any, error)
+	CreateFull(projectID, title, desc string, scopes, depends []string, gate string) (any, error)
 	Get(id string) (any, error)
 	List(projectID string) ([]any, error)
 	Ready(projectID string) ([]any, error)

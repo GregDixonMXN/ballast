@@ -105,12 +105,12 @@ func (p *PGRepo) SetCanonicalHead(ctx context.Context, id, sha string) error {
 
 func (p *PGRepo) SaveTask(ctx context.Context, t task.Task) error {
 	_, err := p.db.ExecContext(ctx, `
-INSERT INTO tasks(id, project_id, title, description, scopes, depends_on, status, assignee_id, created_at, updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+INSERT INTO tasks(id, project_id, title, description, scopes, depends_on, test_command, status, assignee_id, created_at, updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, description=EXCLUDED.description,
-scopes=EXCLUDED.scopes, depends_on=EXCLUDED.depends_on, status=EXCLUDED.status, assignee_id=EXCLUDED.assignee_id,
+scopes=EXCLUDED.scopes, depends_on=EXCLUDED.depends_on, test_command=EXCLUDED.test_command, status=EXCLUDED.status, assignee_id=EXCLUDED.assignee_id,
 updated_at=EXCLUDED.updated_at`,
-		t.ID, t.ProjectID, t.Title, t.Description, strList(t.Scopes), strList(t.DependsOn),
+		t.ID, t.ProjectID, t.Title, t.Description, strList(t.Scopes), strList(t.DependsOn), t.TestCommand,
 		string(t.Status), nullUUID(t.AssigneeID), t.CreatedAt, t.UpdatedAt)
 	return err
 }
@@ -131,7 +131,7 @@ func scanTask(row *sql.Row) (task.Task, error) {
 	var scopes, depends []byte
 	var status string
 	var assignee sql.NullString
-	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &scopes, &depends,
+	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &scopes, &depends, &t.TestCommand,
 		&status, &assignee, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return task.Task{}, err
@@ -151,7 +151,7 @@ func scanTask(row *sql.Row) (task.Task, error) {
 
 func (p *PGRepo) GetTask(ctx context.Context, id string) (task.Task, error) {
 	t, err := scanTask(p.db.QueryRowContext(ctx, `
-SELECT id, project_id, title, description, scopes, depends_on, status, assignee_id, created_at, updated_at
+SELECT id, project_id, title, description, scopes, depends_on, test_command, status, assignee_id, created_at, updated_at
 FROM tasks WHERE id=$1`, id))
 	if err == sql.ErrNoRows {
 		return task.Task{}, fmt.Errorf("unknown task %s", id)
@@ -161,7 +161,7 @@ FROM tasks WHERE id=$1`, id))
 
 func (p *PGRepo) ListTasks(ctx context.Context, projectID string) ([]task.Task, error) {
 	rows, err := p.db.QueryContext(ctx, `
-SELECT id, project_id, title, description, scopes, depends_on, status, assignee_id, created_at, updated_at
+SELECT id, project_id, title, description, scopes, depends_on, test_command, status, assignee_id, created_at, updated_at
 FROM tasks WHERE project_id=$1 ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -173,7 +173,7 @@ FROM tasks WHERE project_id=$1 ORDER BY created_at`, projectID)
 		var scopes, depends []byte
 		var status string
 		var assignee sql.NullString
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &scopes, &depends,
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &scopes, &depends, &t.TestCommand,
 			&status, &assignee, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}

@@ -29,6 +29,7 @@ type Task struct {
 	Description string    `json:"description"`
 	Scopes      []string  `json:"scopes,omitempty"`
 	DependsOn   []string  `json:"depends_on,omitempty"`
+	TestCommand string    `json:"test_command,omitempty"`
 	Status      Status    `json:"status"`
 	AssigneeID  string    `json:"assignee_id,omitempty"` // agent instance or user
 	CreatedAt   time.Time `json:"created_at"`

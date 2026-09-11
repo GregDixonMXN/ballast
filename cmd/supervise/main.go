@@ -296,7 +296,7 @@ func keys(m map[string]bool) []string {
 	return out
 }
 
-const plannerSystem = `You decompose a project outline into an executable task list. Reply with a single JSON array and nothing else. Each element: {"title": string, "description": string (concrete steps + acceptance), "scopes": [repo-relative path prefixes, e.g. "crates/fees/"], "depends_on": [0-based indexes into this same array]}. Rules: one scope per task (split shared files into their own tasks); order so dependencies come first; keep tasks small (one reviewer can verify in minutes); every task states its acceptance check.`
+const plannerSystem = `You decompose a project outline into an executable task list. Reply with a single JSON array and nothing else. Each element: {"title": string, "description": string (concrete steps + acceptance), "scopes": [repo-relative path prefixes, e.g. "crates/fees/"], "depends_on": [0-based indexes into this same array], "gate": string (a SELF-CONTAINED check runnable with only this task's scope complete, e.g. "python3 -c 'import mymod'" — never the project-wide suite, which downstream tasks may break)}. Rules: one scope per task (split shared files into their own tasks); order so dependencies come first; keep tasks small (one reviewer can verify in minutes); every task states its acceptance check; early tasks get narrow gates, only the final task may use the project-wide gate.`
 
 // planProject reads an outline .md plus the repo tree, asks the model
 // for a task list, and creates the tasks with dependency edges.
@@ -338,7 +338,7 @@ func planProject(c *client) error {
 		}
 		v, err := c.call("POST", "/projects/"+*project+"/tasks", map[string]any{
 			"title": t.Title, "description": t.Description,
-			"scopes": t.Scopes, "depends_on": deps,
+			"scopes": t.Scopes, "depends_on": deps, "test_command": t.Gate,
 		})
 		if err != nil {
 			return fmt.Errorf("create task %d (%s): %w", i, t.Title, err)
@@ -359,6 +359,7 @@ type plannedTask struct {
 	Description string   `json:"description"`
 	Scopes      []string `json:"scopes"`
 	Depends     []int    `json:"depends_on"`
+	Gate        string   `json:"gate"`
 }
 
 func parseTaskList(text string) ([]plannedTask, error) {

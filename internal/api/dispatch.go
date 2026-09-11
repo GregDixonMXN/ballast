@@ -159,6 +159,14 @@ func (s *Server) pollWork(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, item)
 }
 
+// firstNonEmpty prefers the per-task gate over the assign default.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // taskReady reports whether t's dependencies are all DONE.
 func (s *Server) taskReady(t task.Task) bool {
 	if len(t.DependsOn) == 0 {
@@ -248,7 +256,7 @@ func (s *Server) assignTask(w http.ResponseWriter, r *http.Request) {
 	}
 	item := WorkItem{WorkspaceID: ws.ID, ProjectID: t.ProjectID, TaskID: t.ID,
 		Title: t.Title, Description: t.Description, Prompt: prompt,
-		Adapter: in.Adapter, TestCommand: in.TestCommand, Path: ws.Path}
+		Adapter: in.Adapter, TestCommand: firstNonEmpty(t.TestCommand, in.TestCommand), Path: ws.Path}
 	if !s.dispatch.Enqueue(in.RunnerID, item) {
 		writeJSON(w, 404, map[string]string{"error": "unknown runner"})
 		return
