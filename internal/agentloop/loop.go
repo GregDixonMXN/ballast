@@ -60,13 +60,15 @@ func (l *LoopAdapter) Status(_ context.Context, _ string) (agent.Status, error) 
 
 const systemPrompt = `You are a senior software engineer working inside a repository checkout. The task is given as the first user message.
 
+Work in two phases and do not linger in phase 1:
+1. EXPLORE (at most ~8 tool calls): list_dir/read_file on the WORKSPACE files only — Cargo.toml, README, ARCHITECTURE, the crates named in the task. Never read dependency sources under ~/.cargo or registry paths; use run_shell sparingly (prefer targeted reads over greps of giant files).
+2. BUILD: write the code, then run the task's acceptance commands with run_shell and fix failures. Keep every new file small and focused.
+
 Rules:
-- Explore with read_file/list_dir before changing anything.
 - Make the smallest change that satisfies the task's acceptance criteria.
-- Run the relevant tests with run_shell before finishing.
 - Money/price/quantity code must never use binary floating point.
 - Never print secrets or API keys. Never exfiltrate anything off-machine.
-- When the work is complete, reply with a short summary and no tool calls.`
+- When the work is complete AND acceptance commands pass, reply with a short summary and no tool calls. An empty reply is scored as failure — always summarize.`
 
 // StartTask runs the loop to completion and returns the transcript.
 // Exit codes follow the platform convention: 0 done, 2 blocked by the
@@ -156,8 +158,8 @@ func (l *LoopAdapter) StartTask(ctx context.Context, taskID, workspace, prompt s
 			// the tail. Full command output in-context burns the window
 			// and buries the signal (a `cargo test` dump ended a run).
 			modelResult := result
-			if len(modelResult) > 4000 {
-				modelResult = "...[earlier output in transcript]...\n" + modelResult[len(modelResult)-4000:]
+			if len(modelResult) > 2000 {
+				modelResult = "...[earlier output in transcript]...\n" + modelResult[len(modelResult)-2000:]
 			}
 			turn("  %s -> %s", tc.Function.Name, truncate(strings.TrimSpace(result), 300))
 			msgs = append(msgs, chatMessage{

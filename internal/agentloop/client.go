@@ -34,7 +34,7 @@ func (c Config) withDefaults() Config {
 		c.Model = "muse-spark-1.3"
 	}
 	if c.HTTP == nil {
-		c.HTTP = &http.Client{Timeout: 120 * time.Second}
+		c.HTTP = &http.Client{Timeout: 300 * time.Second}
 	}
 	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
 	return c
