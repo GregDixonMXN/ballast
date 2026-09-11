@@ -105,6 +105,22 @@ type Client struct {
 	cfg Config
 }
 
+// Plan runs a single tool-free completion and returns the assistant
+// text. Used by project-mode planning (outline -> task list), where
+// task creation stays in the caller's hands and the model never sees
+// credentials.
+func Plan(ctx context.Context, cfg Config, system, user string) (string, error) {
+	c := NewClient(cfg)
+	reply, err := c.Complete(ctx, []chatMessage{
+		{Role: "system", Content: system},
+		{Role: "user", Content: user},
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	return reply.Message.Content, nil
+}
+
 func NewClient(cfg Config) *Client { return &Client{cfg: cfg.withDefaults()} }
 
 // Complete sends the conversation and returns the assistant's message.

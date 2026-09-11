@@ -15,6 +15,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -24,16 +25,22 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"ballast/internal/agentloop"
 )
 
 var (
-	server    = flag.String("server", "http://127.0.0.1:8080", "ballast server")
-	tokenFile = flag.String("token-file", "", "operator token file")
-	project   = flag.String("project", "", "project id (required)")
-	adapter   = flag.String("adapter", "loop", "adapter for assignments")
-	testCmd   = flag.String("test-command", "", "test gate command")
-	interval  = flag.Duration("interval", 60*time.Second, "poll interval")
-	maxRounds = flag.Int("rounds", 0, "max rounds (0 = until complete)")
+	server       = flag.String("server", "http://127.0.0.1:8080", "ballast server")
+	tokenFile    = flag.String("token-file", "", "operator token file")
+	project      = flag.String("project", "", "project id (required)")
+	adapter      = flag.String("adapter", "loop", "adapter for assignments")
+	testCmd      = flag.String("test-command", "", "test gate command")
+	interval     = flag.Duration("interval", 60*time.Second, "poll interval")
+	maxRounds    = flag.Int("rounds", 0, "max rounds (0 = until complete)")
+	planFile     = flag.String("plan", "", "outline .md file: plan tasks then exit")
+	modelBase    = flag.String("model-base-url", "https://api.meta.ai/v1", "model endpoint for --plan")
+	modelKeyFile = flag.String("model-key-file", "", "model API key file for --plan")
+	modelName    = flag.String("model", "muse-spark-1.3-contributor", "model id for --plan")
 )
 
 type client struct {
@@ -109,6 +116,14 @@ func main() {
 		}
 	}
 	fmt.Println("test-command:", *testCmd)
+
+	if *planFile != "" {
+		if err := planProject(c); err != nil {
+			fmt.Fprintln(os.Stderr, "plan:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	for round := 1; ; round++ {
 		done, err := superviseRound(c)
@@ -279,4 +294,128 @@ func keys(m map[string]bool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+const plannerSystem = `You decompose a project outline into an executable task list. Reply with a single JSON array and nothing else. Each element: {"title": string, "description": string (concrete steps + acceptance), "scopes": [repo-relative path prefixes, e.g. "crates/fees/"], "depends_on": [0-based indexes into this same array]}. Rules: one scope per task (split shared files into their own tasks); order so dependencies come first; keep tasks small (one reviewer can verify in minutes); every task states its acceptance check.`
+
+// planProject reads an outline .md plus the repo tree, asks the model
+// for a task list, and creates the tasks with dependency edges.
+func planProject(c *client) error {
+	pv, err := c.call("GET", "/projects/"+*project, nil)
+	if err != nil {
+		return err
+	}
+	pm, _ := pv.(map[string]any)
+	repo, _ := pm["repo_path"].(string)
+	outline, err := os.ReadFile(*planFile)
+	if err != nil {
+		return err
+	}
+	tree := repoTree(repo, 3, 120)
+	key, err := readKey(*modelKeyFile)
+	if err != nil {
+		return err
+	}
+	user := fmt.Sprintf("PROJECT: %s\nTEST GATE: %s\nREPO TREE:\n%s\nOUTLINE:\n%s",
+		pm["name"], *testCmd, tree, string(outline))
+	text, err := agentloop.Plan(context.Background(), agentloop.Config{
+		BaseURL: *modelBase, APIKey: key, Model: *modelName,
+	}, plannerSystem, user)
+	if err != nil {
+		return err
+	}
+	tasks, err := parseTaskList(text)
+	if err != nil {
+		return fmt.Errorf("planner returned bad JSON: %w\n%s", err, text)
+	}
+	ids := make([]string, len(tasks))
+	for i, t := range tasks {
+		deps := []string{}
+		for _, d := range t.Depends {
+			if d >= 0 && d < i {
+				deps = append(deps, ids[d])
+			}
+		}
+		v, err := c.call("POST", "/projects/"+*project+"/tasks", map[string]any{
+			"title": t.Title, "description": t.Description,
+			"scopes": t.Scopes, "depends_on": deps,
+		})
+		if err != nil {
+			return fmt.Errorf("create task %d (%s): %w", i, t.Title, err)
+		}
+		m, _ := v.(map[string]any)
+		ids[i], _ = m["id"].(string)
+		fmt.Printf("planned %s %s (deps %d)\n", ids[i][:8], t.Title, len(deps))
+	}
+	c.call("POST", "/projects/"+*project+"/notes", map[string]any{
+		"author": "supervisor",
+		"text":   fmt.Sprintf("planner: %d tasks from %s", len(tasks), *planFile),
+	})
+	return nil
+}
+
+type plannedTask struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Scopes      []string `json:"scopes"`
+	Depends     []int    `json:"depends_on"`
+}
+
+func parseTaskList(text string) ([]plannedTask, error) {
+	start := strings.Index(text, "[")
+	end := strings.LastIndex(text, "]")
+	if start < 0 || end <= start {
+		return nil, fmt.Errorf("no JSON array found")
+	}
+	var out []plannedTask
+	if err := json.Unmarshal([]byte(text[start:end+1]), &out); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty task list")
+	}
+	return out, nil
+}
+
+// repoTree lists the repo to a capped depth for the planner prompt.
+func repoTree(root string, depth, max int) string {
+	var b strings.Builder
+	count := 0
+	var walk func(dir, prefix string, d int)
+	walk = func(dir, prefix string, d int) {
+		if d < 0 || count >= max {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if count >= max {
+				return
+			}
+			name := e.Name()
+			if strings.HasPrefix(name, ".git") || name == "target" || name == "node_modules" {
+				continue
+			}
+			count++
+			b.WriteString(prefix + name + "\n")
+			if e.IsDir() {
+				walk(dir+"/"+name, prefix+"  ", d-1)
+			}
+		}
+	}
+	walk(root, "", depth)
+	return b.String()
+}
+
+func readKey(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("-model-key-file required for --plan")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(raw)), nil
 }
