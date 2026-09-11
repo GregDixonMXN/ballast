@@ -75,7 +75,7 @@ func TestIntegrateMergesAndMovesHead(t *testing.T) {
 	}
 }
 
-func TestIntegrateStaleCleanNeedsRebase(t *testing.T) {
+func TestIntegrateStaleCleanRebaseApplies(t *testing.T) {
 	ctx := context.Background()
 	repo := mergeRepo(t)
 	// Loser built on the old base, touching b.go.
@@ -91,14 +91,22 @@ func TestIntegrateStaleCleanNeedsRebase(t *testing.T) {
 	if res, err := Integrate(ctx, repo, "main", win, t.TempDir()); err != nil || !res.Merged {
 		t.Fatalf("winner: %+v %v", res, err)
 	}
-	// Loser revalidated: base moved, diff still applies elsewhere.
+	// Loser rebased: base moved but the diff still applies onto head,
+	// so it merges instead of stranding in NEEDS_REBASE.
 	lose.Status = changeset.Approved
 	res, err := Integrate(ctx, repo, "main", lose, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Merged || lose.Status != changeset.NeedsRebase {
-		t.Fatalf("expected NEEDS_REBASE, got %+v status %q", res, lose.Status)
+	if !res.Merged || lose.Status != changeset.Merged {
+		t.Fatalf("expected rebase-apply MERGED, got %+v status %q", res, lose.Status)
+	}
+	content, err := os.ReadFile(filepath.Join(repo, "b.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "package b\n// loser\n" {
+		t.Fatalf("canonical b.go = %q", content)
 	}
 }
 

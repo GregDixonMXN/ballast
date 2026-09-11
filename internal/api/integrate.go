@@ -36,7 +36,7 @@ func (s *Server) integrate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": "changeset type mismatch"})
 		return
 	}
-	if cs.Status != changeset.Approved {
+	if cs.Status != changeset.Approved && cs.Status != changeset.NeedsRebase {
 		writeJSON(w, 409, map[string]string{"error": "only APPROVED changesets integrate (status " + string(cs.Status) + ")"})
 		return
 	}

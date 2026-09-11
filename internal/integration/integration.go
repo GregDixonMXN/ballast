@@ -90,12 +90,14 @@ func Integrate(ctx context.Context, repo, branch string, cs *changeset.Changeset
 		return nil, fmt.Errorf("read canonical head: %w", err)
 	}
 	if cs.Base != head {
-		if Applies(ctx, repo, head, cs.Diff, workRoot) {
-			cs.Status = changeset.NeedsRebase
-			return &Result{Reason: "base " + short(cs.Base) + " behind canonical " + short(head) + "; diff still applies"}, nil
+		if !Applies(ctx, repo, head, cs.Diff, workRoot) {
+			cs.Status = changeset.Conflicted
+			return &Result{Conflict: true, Reason: "base moved and diff no longer applies to " + short(head)}, nil
 		}
-		cs.Status = changeset.Conflicted
-		return &Result{Conflict: true, Reason: "base moved and diff no longer applies to " + short(head)}, nil
+		// Base moved but the diff still applies onto head: fall through
+		// and apply it there (rebase-apply). NEEDS_REBASE remains for
+		// cases that need a fresh agent run, not as a dead end.
+		cs.Base = head
 	}
 	if strings.TrimSpace(cs.Diff) == "" {
 		cs.Status = changeset.Merged
