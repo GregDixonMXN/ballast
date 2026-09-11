@@ -63,6 +63,18 @@ func main() {
 	if *agentBin != "" {
 		adapters = append(adapters, agent.NewShell("custom", *agentBin, nil))
 	}
+	if *modelKeyFile != "" {
+		key, err := readAPIKeyFile(*modelKeyFile)
+		if err != nil {
+			log.Fatalf("model key: %v", err)
+		}
+		adapters = append(adapters, agentloop.NewLoop("loop", agentloop.LoopConfig{
+			Model: agentloop.Config{BaseURL: *modelBaseURL, APIKey: key, Model: *modelName},
+			OnTurn: func(s string) {
+				log.Printf("loop: %s", s)
+			},
+		}))
+	}
 	if *agentHome != "" {
 		absolute, err := filepath.Abs(*agentHome)
 		if err != nil {
@@ -85,18 +97,6 @@ func main() {
 		if adapter.Available(ctx) {
 			capabilities = append(capabilities, adapter.Name())
 		}
-	}
-	if *modelKeyFile != "" {
-		key, err := readAPIKeyFile(*modelKeyFile)
-		if err != nil {
-			log.Fatalf("model key: %v", err)
-		}
-		adapters = append(adapters, agentloop.NewLoop("loop", agentloop.LoopConfig{
-			Model: agentloop.Config{BaseURL: *modelBaseURL, APIKey: key, Model: *modelName},
-			OnTurn: func(s string) {
-				log.Printf("loop: %s", s)
-			},
-		}))
 	}
 	cli := &runner.Client{Base: *server, Token: token}
 	for _, adapter := range adapters {
