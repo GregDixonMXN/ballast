@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"testing"
 
-	"ballast/internal/changeset"
-	"ballast/internal/events"
-	"ballast/internal/project"
-	"ballast/internal/task"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/events"
+	"github.com/GregDixonMXN/ballast/internal/project"
+	"github.com/GregDixonMXN/ballast/internal/task"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 func localFixture(t *testing.T) (*LocalRepo, string, project.Project) {

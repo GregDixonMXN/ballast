@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ballast/internal/changeset"
-	"ballast/internal/project"
-	"ballast/internal/store"
-	"ballast/internal/task"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/project"
+	"github.com/GregDixonMXN/ballast/internal/store"
+	"github.com/GregDixonMXN/ballast/internal/task"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 func gitRepo(t *testing.T) string {

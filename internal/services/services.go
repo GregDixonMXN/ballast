@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"ballast/internal/changeset"
-	"ballast/internal/git"
-	"ballast/internal/project"
-	"ballast/internal/task"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/git"
+	"github.com/GregDixonMXN/ballast/internal/project"
+	"github.com/GregDixonMXN/ballast/internal/task"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 // Repo persists domain records. Memory and Postgres implementations live

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"ballast/internal/project"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/project"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 // claimScope records a cooperative scope claim for a workspace and

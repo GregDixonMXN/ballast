@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"ballast/internal/agent"
+	"github.com/GregDixonMXN/ballast/internal/agent"
 
 	"github.com/google/uuid"
 )

@@ -14,14 +14,14 @@ import (
 	"syscall"
 	"time"
 
-	"ballast/internal/api"
-	"ballast/internal/auth"
-	"ballast/internal/events"
-	overseerPkg "ballast/internal/overseer"
-	"ballast/internal/services"
-	"ballast/internal/store"
-	"ballast/internal/telemetry"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/api"
+	"github.com/GregDixonMXN/ballast/internal/auth"
+	"github.com/GregDixonMXN/ballast/internal/events"
+	overseerPkg "github.com/GregDixonMXN/ballast/internal/overseer"
+	"github.com/GregDixonMXN/ballast/internal/services"
+	"github.com/GregDixonMXN/ballast/internal/store"
+	"github.com/GregDixonMXN/ballast/internal/telemetry"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 var version = "1.0.0-rc.1"

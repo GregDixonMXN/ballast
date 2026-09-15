@@ -6,7 +6,7 @@ Tasks → isolated Git worktrees → a dumb runner executes ONE command →
 changeset (files/diff/tests) → overlap/rebase check → approve/integrate.
 The dashboard on loopback views that state; it does not run your work.
 
-This is the **1.0.0-rc.1 local release candidate**, not a hosted service.
+This is the **1.0.0 local release**, not a hosted service.
 
 ## Start locally
 

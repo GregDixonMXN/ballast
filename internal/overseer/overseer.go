@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"ballast/internal/lease"
-	"ballast/internal/notes"
+	"github.com/GregDixonMXN/ballast/internal/lease"
+	"github.com/GregDixonMXN/ballast/internal/notes"
 )
 
 // Tasks source: subset of the task service the sweep needs.

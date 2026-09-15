@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 
-	"ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
 )
 
 // SetHead records a moved canonical head. Only integration calls this.

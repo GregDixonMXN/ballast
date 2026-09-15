@@ -6,10 +6,10 @@ import (
 	"sort"
 	"sync"
 
-	"ballast/internal/changeset"
-	"ballast/internal/project"
-	"ballast/internal/task"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/project"
+	"github.com/GregDixonMXN/ballast/internal/task"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 // MemoryRepo is the zero-dependency Repo: process-local maps for dev,

@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"ballast/internal/auth"
-	"ballast/internal/changeset"
-	"ballast/internal/events"
-	"ballast/internal/task"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/auth"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/events"
+	"github.com/GregDixonMXN/ballast/internal/task"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 	"github.com/google/uuid"
 )
 

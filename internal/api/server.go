@@ -5,19 +5,19 @@
 package api
 
 import (
-	"ballast/internal/project"
 	"encoding/json"
+	"github.com/GregDixonMXN/ballast/internal/project"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"ballast/internal/auth"
-	"ballast/internal/changeset"
-	"ballast/internal/events"
-	"ballast/internal/lease"
-	"ballast/internal/notes"
-	"ballast/internal/telemetry"
+	"github.com/GregDixonMXN/ballast/internal/auth"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/events"
+	"github.com/GregDixonMXN/ballast/internal/lease"
+	"github.com/GregDixonMXN/ballast/internal/notes"
+	"github.com/GregDixonMXN/ballast/internal/telemetry"
 )
 
 // Server wires handlers to domain services.

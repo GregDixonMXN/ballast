@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"ballast/migrations"
+	"github.com/GregDixonMXN/ballast/migrations"
 	_ "github.com/lib/pq"
 )
 

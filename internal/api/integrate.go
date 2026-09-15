@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"os"
 
-	"ballast/internal/changeset"
-	"ballast/internal/events"
-	"ballast/internal/integration"
-	"ballast/internal/project"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/events"
+	"github.com/GregDixonMXN/ballast/internal/integration"
+	"github.com/GregDixonMXN/ballast/internal/project"
 )
 
 func (s *Server) integrate(w http.ResponseWriter, r *http.Request) {

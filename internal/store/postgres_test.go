@@ -15,10 +15,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"ballast/internal/changeset"
-	"ballast/internal/project"
-	"ballast/internal/task"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/project"
+	"github.com/GregDixonMXN/ballast/internal/task"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 func disposablePostgresURL(raw string) (*url.URL, error) {

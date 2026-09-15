@@ -25,9 +25,9 @@ Do not test an old package after changing the source; rebuild it.
 
 This workflow creates local artifacts only. It does not commit, tag, push,
 publish a package, provision hosting, or upload source/state to a third party.
-Before public distribution, the owner must choose project licensing, resolve
-third-party notices, select a signing/update/support channel, and run hosted CI.
-Do not label an unsigned local candidate as an externally audited production launch.
+Before public distribution, the owner confirmed MIT licensing (see LICENSE)
+and ran hosted CI. The local archive is unsigned; checksums verify integrity,
+not authorship. Do not label it as an externally audited production launch.
 
 ## Evidence
 

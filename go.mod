@@ -1,4 +1,4 @@
-module ballast
+module github.com/GregDixonMXN/ballast
 
 go 1.27.1
 

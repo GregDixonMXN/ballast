@@ -16,8 +16,8 @@ import (
 	"sync"
 	"syscall"
 
-	"ballast/internal/changeset"
-	"ballast/internal/git"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/git"
 )
 
 // Result of an integration attempt.

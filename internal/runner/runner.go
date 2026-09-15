@@ -5,10 +5,10 @@
 package runner
 
 import (
-	"ballast/internal/executil"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/GregDixonMXN/ballast/internal/executil"
 	"io"
 	"net/http"
 	"os"
@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"ballast/internal/agent"
-	"ballast/internal/api"
+	"github.com/GregDixonMXN/ballast/internal/agent"
+	"github.com/GregDixonMXN/ballast/internal/api"
 )
 
 // Client talks to the control-plane dispatch endpoints.

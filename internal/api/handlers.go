@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
-	"ballast/internal/changeset"
-	"ballast/internal/events"
-	"ballast/internal/services"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/events"
+	"github.com/GregDixonMXN/ballast/internal/services"
 )
 
 // Handlers below are thin: services are injected in production wiring

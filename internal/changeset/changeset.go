@@ -8,7 +8,7 @@ import (
 	"context"
 	"time"
 
-	"ballast/internal/git"
+	"github.com/GregDixonMXN/ballast/internal/git"
 	"github.com/google/uuid"
 )
 

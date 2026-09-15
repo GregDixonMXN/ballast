@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ballast/internal/changeset"
-	"ballast/internal/git"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/git"
 )
 
 func mergeRepo(t *testing.T) string {

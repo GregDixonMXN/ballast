@@ -13,11 +13,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ballast/internal/auth"
-	"ballast/internal/events"
-	"ballast/internal/services"
-	"ballast/internal/store"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/auth"
+	"github.com/GregDixonMXN/ballast/internal/events"
+	"github.com/GregDixonMXN/ballast/internal/services"
+	"github.com/GregDixonMXN/ballast/internal/store"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 func testServer(t *testing.T, repoPath string) (*httptest.Server, string, map[string]string) {

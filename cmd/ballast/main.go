@@ -2,11 +2,11 @@
 package main
 
 import (
-	"ballast/internal/auth"
 	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/GregDixonMXN/ballast/internal/auth"
 	"io"
 	"net/http"
 	"net/url"

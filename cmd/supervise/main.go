@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"ballast/internal/agentloop"
+	"github.com/GregDixonMXN/ballast/internal/agentloop"
 )
 
 var (

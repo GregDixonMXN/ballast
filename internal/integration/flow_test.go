@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ballast/internal/changeset"
-	"ballast/internal/conflict"
-	"ballast/internal/git"
-	"ballast/internal/workspace"
+	"github.com/GregDixonMXN/ballast/internal/changeset"
+	"github.com/GregDixonMXN/ballast/internal/conflict"
+	"github.com/GregDixonMXN/ballast/internal/git"
+	"github.com/GregDixonMXN/ballast/internal/workspace"
 )
 
 func sh(t *testing.T, dir string, args ...string) {

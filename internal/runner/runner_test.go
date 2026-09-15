@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"ballast/internal/agent"
-	"ballast/internal/api"
+	"github.com/GregDixonMXN/ballast/internal/agent"
+	"github.com/GregDixonMXN/ballast/internal/api"
 )
 
 type fakeAdapter struct {

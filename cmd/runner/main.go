@@ -6,10 +6,10 @@
 package main
 
 import (
-	"ballast/internal/auth"
 	"context"
 	"flag"
 	"fmt"
+	"github.com/GregDixonMXN/ballast/internal/auth"
 	"log"
 	"os"
 	"os/signal"
@@ -19,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"ballast/internal/agent"
-	"ballast/internal/agentloop"
-	"ballast/internal/api"
-	"ballast/internal/runner"
-	"ballast/internal/telemetry"
+	"github.com/GregDixonMXN/ballast/internal/agent"
+	"github.com/GregDixonMXN/ballast/internal/agentloop"
+	"github.com/GregDixonMXN/ballast/internal/api"
+	"github.com/GregDixonMXN/ballast/internal/runner"
+	"github.com/GregDixonMXN/ballast/internal/telemetry"
 )
 
 var version = "1.0.0-rc.1"
