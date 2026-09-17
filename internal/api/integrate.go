@@ -9,10 +9,13 @@ package api
 import (
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/GregDixonMXN/ballast/internal/changeset"
 	"github.com/GregDixonMXN/ballast/internal/events"
+	"github.com/GregDixonMXN/ballast/internal/git"
 	"github.com/GregDixonMXN/ballast/internal/integration"
+	"github.com/GregDixonMXN/ballast/internal/jev"
 	"github.com/GregDixonMXN/ballast/internal/project"
 )
 
@@ -101,6 +104,11 @@ func (s *Server) revalidateSiblings(r *http.Request, p project.Project, mergedID
 		if integration.Applies(r.Context(), p.RepoPath, newHead, sib.Diff, os.TempDir()) {
 			_, _ = s.Changesets.Mark(sib.ID, changeset.NeedsRebase)
 			out["rebase"]++
+		} else if s.jevRebasable(r, p.RepoPath, mergedID, sib) {
+			// Semantic triage: mechanical drift, not a real clash. The
+			// sibling's intent survives a rebase — don't dead-end it.
+			_, _ = s.Changesets.Mark(sib.ID, changeset.NeedsRebase)
+			out["rebase"]++
 		} else {
 			_, _ = s.Changesets.Mark(sib.ID, changeset.Conflicted)
 			_ = s.bus.Publish(r.Context(), events.New(p.ID, events.ActorSystem, "",
@@ -111,6 +119,49 @@ func (s *Server) revalidateSiblings(r *http.Request, p project.Project, mergedID
 		}
 	}
 	return out
+}
+
+// jevRebasable asks whether a sibling that no longer applies is only
+// mechanical drift. True means NEEDS_REBASE instead of CONFLICTED. Any
+// failure — flag off, no key, judge error, torn judgment — returns false,
+// keeping today's fail-toward-human verdict.
+func (s *Server) jevRebasable(r *http.Request, repoPath, mergedID string, sib changeset.Changeset) bool {
+	if !jev.Enabled() {
+		return false
+	}
+	rawMerged, err := s.Changesets.Get(mergedID)
+	if err != nil {
+		return false
+	}
+	merged, ok := rawMerged.(changeset.Changeset)
+	if !ok {
+		return false
+	}
+	// Base content both changes started from: the context that lets the
+	// model tell drift from clash. Best effort — unreadable files are
+	// simply absent from the judgment.
+	base := map[string]string{}
+	for i, f := range sib.Files {
+		if i >= 3 {
+			break
+		}
+		content, err := git.Show(r.Context(), repoPath, sib.Base+":"+f)
+		if err != nil || strings.TrimSpace(content) == "" {
+			continue
+		}
+		base[f] = content
+	}
+	d, err := jev.JudgeSibling(jev.Sibling{
+		MergedDiff:   merged.Diff,
+		MergedFiles:  merged.Files,
+		SiblingDiff:  sib.Diff,
+		SiblingFiles: sib.Files,
+		BaseFiles:    base,
+	})
+	if err != nil {
+		return false
+	}
+	return d.Choice == "rebasable" && d.Confidence >= 0.5
 }
 
 func shortHead(s string) string {

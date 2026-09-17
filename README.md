@@ -75,6 +75,16 @@ and the in-process model tool-loop do not run unless `BALLAST_BRAIN=1`.
 Default launches are facts only: assign, worktrees, gates, changesets,
 overlap, integrate.
 
+## BALLAST_JEV (default off)
+
+When a merge leaves siblings on a stale base, the triage is syntactic:
+still-applies → NEEDS_REBASE, otherwise CONFLICTED. With `BALLAST_JEV=1`
+(and `JEV_API_KEY` set), a sibling that no longer applies gets one
+semantic judgment over both diffs plus the base files they started from:
+mechanical drift → NEEDS_REBASE instead of a dead-end CONFLICTED; genuine
+clash, judge error, torn judgment (confidence < 0.5), or no key →
+CONFLICTED as before. Default launches call nothing.
+
 ## What isolation means
 
 Worktrees separate working directories, **not operating-system authority**.
