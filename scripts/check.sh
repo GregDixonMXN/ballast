@@ -13,4 +13,5 @@ if [[ -n $formatting ]]; then printf 'Unformatted Go files:\n%s\n' "$formatting"
 npm ci --prefix apps/web
 npm run typecheck --prefix apps/web
 npm run build --prefix apps/web
+./scripts/check-version.sh
 git diff --check
